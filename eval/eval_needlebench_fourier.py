@@ -17,30 +17,30 @@ is_single_niah = (len([key for key in list(locals()) if key.__contains__('parall
 
 models = [
     dict(
-        abbr = 'llama3.1_8b-fourierhippo-needlebench-real',
+        abbr = 'llama3.1_8b-fourierhippo-needlebench',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.1-8B/",
+        path="meta-llama/Llama-3.1-8B",
         model_type='llama',
         max_out_len=50 if is_single_niah else 250,
         max_seq_len=409600,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdiffer_llama3.1-8b/non_critical_dims_hippofourier_kvdiffer6_32k_1024_final.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.1-8b/compressed_dims_32k_1024states.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3.2_3b-fourierhippo-needlebench-real',
+        abbr = 'llama3.2_3b-fourierhippo-needlebench',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=50 if is_single_niah else 250,
         max_seq_len=409600,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdifferjson_32k/non_critical_dims_hippofourier_kvdiffer_final.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_32k_1024states.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
 ]
 
-work_dir = './outputs/fourierhippo-needlebench-noncriticalwith1024mid_32knewyuliao-real/'
+work_dir = './outputs/fourierhippo-needlebench/'
 
 
 

@@ -15,52 +15,52 @@ datasets = ruler_datasets
 
 models = [
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-kv0',
+        abbr = 'llama3_2-3b-fourierhippo-ruler4k-uniform',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdiffer_4k/non_critical_dims_hippofourier_kvdiffer0.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_uniform.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-kv1',
+        abbr = 'llama3_2-3b-fourierhippo-ruler4k-fourier',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdiffer_4k/non_critical_dims_hippofourier_kvdiffer1.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-kv2',
+        abbr = 'llama3_2-3b-fourierhippo-ruler-kvinverse',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdiffer_4k/non_critical_dims_hippofourier_kvdiffer2.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_kv-inverse.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-kv3',
+        abbr = 'llama3_2-3b-fourierhippo-ruler-layerinverse',
         type=HippoattnCausalLM,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdiffer_4k/non_critical_dims_hippofourier_kvdiffer3.json"),
+        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_layer-inverse.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
 ]
 
-work_dir ='outputs/llama3_2-3b-fourierhippo-ruler-kvcompare'
+work_dir ='outputs/llama3_2-3b-fourierhippo-ruler4k-ablation'
 
 infer = dict(
     partitioner=dict(type=NaivePartitioner),  # dict(type=NumWorkerPartitioner, num_worker=4),
