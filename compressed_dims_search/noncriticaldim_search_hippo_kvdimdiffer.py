@@ -259,19 +259,13 @@ def run_awq(
                 qkv_result_init = qkv_result[:, :numinittokens, :]
                 qkv_result_local = qkv_result[:, -maxlocallen:, :]  # 局部窗口对应key矩阵
                 qkv_result_tocompress = qkv_result[:, numinittokens:-maxlocallen, :]
-                #存向量
-                # tensor_list = qkv_result_tocompress.detach().cpu().tolist()
-                # filename = f"/remote-home1/qqwang/HippoAttention/output/sample_feature_{i+1}_{name}_tensor.json"
-                # with open(filename, 'w') as f:
-                #     json.dump(tensor_list, f)              
-                print(f"qkv_result_tocompress: {qkv_result_tocompress.size()}")
+
                 qkv_result_mid_compressed = hippo(qkv_result_tocompress.to("cuda"),token_num = 0)
                 qkv_result_mid_decompressed = hippo.reconstruct(qkv_result_mid_compressed, seq_len_ori - numinittokens - maxlocallen)
                 qkv_result_mid_decompressed = qkv_result_mid_decompressed.squeeze(0)
-                print(f"解压缩之后qkv_result的size:{qkv_result_mid_decompressed.size()}")
+            
                 
                 similarities = compute_cosine_similarity(qkv_result_tocompress, qkv_result_mid_decompressed)
-                # qkv_dict[name].append(similarities)  # 修改为直接存储相似度
                 similarity_dict[name].append(similarities)
 
             qkv_results = defaultdict(list)
@@ -286,7 +280,7 @@ def run_awq(
                     print("we are in if")
                     handles.append(
                         module.register_forward_hook(
-                            functools.partial(cache_individual_qkv_hooks, name=name, qkv_dict=qkv_results,similarity_dict=similarity_results, numinittokens=4, maxlocallen=1024, maxmidstates=256)
+                            functools.partial(cache_individual_qkv_hooks, name=name, qkv_dict=qkv_results,similarity_dict=similarity_results, numinittokens=4, maxlocallen=1024, maxmidstates=1024)
                         )
                     )
             
@@ -294,7 +288,7 @@ def run_awq(
             sample = sample.to(next(layer.parameters()).device)
             sample = sample.to("cuda")
             print(f"sample的维度：{sample.size()}")
-            sample = layer(sample, **layer_kwargs)[0]  # 只处理一个样本
+            sample = layer(sample, **layer_kwargs)[0]  
 
             for h in handles:
                 h.remove()
@@ -385,45 +379,21 @@ def run_awq(
             }
 
             # 将数据保存到JSON文件
-            with open('/remote-home1/qqwang/hippofourier/rulerniah_4k_data_256.json', 'a') as json_file:
+            with open('/FourierAttention/compressed_dims_file/data_ruler4k.json ', 'a') as json_file:  # your path to save the mean_similaritites and sorted_indices so that you can use compressed_dims_search_readfile.py to easily change the scale
                 json.dump({layername: {name: data}}, json_file)
-                json_file.write("\n")  # 每个保存数据后添加换行符，确保每次数据不会拼接在一起
+                json_file.write("\n")  
 
 
             # 选出前80%的特征维度
-            num_non_critical = int(percent * mean_similarities.shape[0])  # 计算80%大小  把0.8改成每层不一样的
-            non_critical_indices = sorted_indices[:num_non_critical]  # 获取这些索引
+            num_non_critical = int(percent * mean_similarities.shape[0])  
+            non_critical_indices = sorted_indices[:num_non_critical]  
 
             # 保存到字典
             non_critical_dims_dict[layername][name] = non_critical_indices.tolist()  # 转换为 list 保存
 
-    # for layername, layer_data in all_sample_similarities.items():
-    #     non_critical_dims_dict[layername] = {}
-
-    #     for name, tensor in layer_data.items():
-    #         # 每行取平均，得到每个特征维度的平均 similarity
-    #         mean_similarities =[sum(column) / len(column) for column in zip(*tensor)]
-    #         # mean_similarities = tensor.mean(dim=0)  # 计算每列的平均值
-
-    #         # 对平均值进行排序，选出80%最小的特征维度
-    #         mean_abs_values = mean_similarities.abs()  # 求平均值的绝对值
-    #         sorted_indices = torch.argsort(mean_abs_values)  # 对平均绝对值进行排序
-
-    #         # 选出前80%的特征维度
-    #         num_non_critical = int(0.8 * mean_similarities.shape[0])  # 计算80%大小
-    #         non_critical_indices = sorted_indices[:num_non_critical]  # 获取这些索引
-
-    #         # 保存到字典
-    #         non_critical_dims_dict[layername][name] = non_critical_indices.tolist()
-
-    # 打印结果
-    # for layername, layer_data in non_critical_dims_dict.items():
-    #     print(f"Layer: {layername}")
-    #     for name, non_critical_indices in layer_data.items():
-    #         print(f"  Name: {name}, Non-critical indices: {non_critical_indices}")
 
     # 保存非关键维度结果，可改
-    with open("/remote-home1/qqwang/hippofourier/dimdifferjson_4k/non_critical_dims_hippofourier_kvdiffer6_256states.json", "w", encoding="utf-8") as f:
+    with open("/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier.json", "w", encoding="utf-8") as f:
         json.dump(non_critical_dims_dict, f, ensure_ascii=False, indent=4)
 
     return
@@ -433,34 +403,13 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def main():
     # 模型路径，可改
-    model_name = "/remote-home1/share/models/llama3_2_hf/Llama-3.2-3B/"
-
-    print("加载模型和分词器...")
+    model_name = "meta-llama/Llama-3.2-3B"
+    print("loading models and tokenizer...")
     model = LlamaForCausalLM.from_pretrained(model_name, device_map="cuda:0")
     model = model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    # # 假设第一个JSON文件路径
-    # first_file_path = '/remote-home1/qqwang/hippofourier/ruler_niah_multikey_1_32k.json'
-    # # 从第一个文件读取数据
-    # with open(first_file_path, 'r', encoding='utf-8') as file:
-    #     data = json.load(file)
-    # # 提取第一个文件中的origin_prompt并放入列表
-    # origin_prompts = [entry['origin_prompt'] for entry in data.values()]
-    # # 打印列表长度
-    # print(f"First file origin prompts count: {len(origin_prompts)}")
-    # origin_prompts=origin_prompts[0:20]
 
-    # file_paths = [
-    #     # '/remote-home1/qqwang/hippofourier/ruler_niah_multikey_1_32k.json',
-    #     # '/remote-home1/qqwang/hippofourier/ruler_niah_multikey_2_32k.json',
-    #     '/remote-home1/qqwang/hippofourier/ruler_niah_multikey_3_32k.json',
-    #     '/remote-home1/qqwang/hippofourier/ruler_niah_multiquery_32k.json',
-    #     # '/remote-home1/qqwang/hippofourier/ruler_niah_multivalue_32k.json',
-    #     '/remote-home1/qqwang/hippofourier/ruler_niah_single_1_32k.json',
-    #     '/remote-home1/qqwang/hippofourier/ruler_niah_single_2_32k.json',
-    #     # '/remote-home1/qqwang/hippofourier/ruler_niah_single_3_32k.json',
-    # ]
     file_paths = [
         '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multikey_1_4k.json',
         '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multikey_2_4k.json',

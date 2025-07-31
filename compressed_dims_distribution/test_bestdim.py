@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 # 读取 JSON 文件
-with open("/remote-home1/qqwang/hippofourier/dimdifferjson_4k/non_critical_dims_hippofourier_kvdiffer6.json", "r") as f:
+with open(" ", "r") as f:  #your path to /FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier.json"
     data = json.load(f)
 
 # 提取指定层的索引
@@ -74,7 +74,7 @@ if chunk_counts:
     plt.tight_layout()
 
     # 保存图像
-    save_dir = "/remote-home1/qqwang"
+    save_dir = " "
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, "llama3.2-3b_average_distribution_layer0_reconstruct.pdf")
     plt.savefig(save_path, format='pdf')

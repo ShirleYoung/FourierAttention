@@ -6,25 +6,20 @@ from opencompass.models import HuggingFaceBaseModel
 from opencompass.models import StreamingModel
 
 with read_base():
-    # from opencompass.configs.datasets.needlebench.needlebench.needlebench import needlebench_origin_en_datasets
-    # from opencompass.configs.datasets.needlebench.needlebench.needlebench import needlebench_parallel_en_datasets
-    # from opencompass.configs.summarizers.needlebench import needlebench_summarizer as summarizer
     from opencompass.configs.datasets.longbench.longbench import longbench_datasets
 
 datasets = []
 datasets += longbench_datasets
-
-# is_single_niah = (len([key for key in list(locals()) if key.__contains__('parallel') and key.endswith('datasets')]) == 0)
 
 
 models = [
     dict(
         abbr = 'llama3.1_8b-streamingllm-longbench',
         type = StreamingModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.1-8B/",
+        path="meta-llama/Llama-3.1-8B",
         # model_type='llama',
         max_out_len=100,
-        max_seq_len=409600,
+        max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
         enable_streaming = True,
@@ -35,10 +30,10 @@ models = [
     dict(
         abbr = 'llama3.2_3b-streamingllm-longbench',
         type = StreamingModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         # model_type='llama',
         max_out_len=100,
-        max_seq_len=409600,
+        max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
         enable_streaming = True,

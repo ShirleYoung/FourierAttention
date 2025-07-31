@@ -6,24 +6,32 @@ from opencompass.models import HuggingFaceBaseModel
 from opencompass.models import PyramidKVModel
 
 with read_base():
-    # from opencompass.configs.datasets.needlebench.needlebench.needlebench import needlebench_origin_en_datasets
-    # from opencompass.configs.datasets.needlebench.needlebench.needlebench import needlebench_parallel_en_datasets
-    # from opencompass.configs.summarizers.needlebench import needlebench_summarizer as summarizer
     from opencompass.configs.datasets.longbench.longbench import longbench_datasets
 
 datasets = []
 datasets += longbench_datasets
 
-# is_single_niah = (len([key for key in list(locals()) if key.__contains__('parallel') and key.endswith('datasets')]) == 0)
-
 
 models = [
     dict(
+        abbr='llama3.1_8b-pyramidsnapkv-longbench',
+        type=PyramidKVModel,
+        path="meta-llama/Llama-3.1-8B",
+        max_out_len=500,
+        max_seq_len=32768,
+        batch_size=1,
+        generation_kwargs=dict(),
+        method="snapkv",  # 设定为 pyramidkv 方法
+        attn_implementation="flash_attention_2",  # 您可以根据需要选择其他的实现方式
+        max_capacity_prompt=2052,
+        run_cfg=dict(num_gpus=1, num_procs=1),
+    ),
+    dict(
         abbr='llama3.2_3b-pyramidsnapkv-longbench-512midstates',
         type=PyramidKVModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         max_out_len=500,
-        max_seq_len=409600,
+        max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
         method="snapkv",  # 设定为 pyramidkv 方法
@@ -34,9 +42,9 @@ models = [
     dict(
         abbr='llama3.2_3b-pyramidsnapkv-longbench-1024midstates',
         type=PyramidKVModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         max_out_len=500,
-        max_seq_len=409600,
+        max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
         method="snapkv",  # 设定为 pyramidkv 方法
@@ -47,9 +55,9 @@ models = [
     dict(
         abbr='llama3.2_3b-pyramidsnapkv-longbench-2048midstates',
         type=PyramidKVModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         max_out_len=500,
-        max_seq_len=409600,
+        max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
         method="snapkv",  # 设定为 pyramidkv 方法
@@ -59,7 +67,7 @@ models = [
     ),
 ]
 
-work_dir = './outputs/llama3.2_3b-pyramidsnapkv-longbench-512++1024+2048/'
+work_dir = './outputs/llama3.2_3b-pyramidsnapkv-longbench/'
 
 
 infer = dict(

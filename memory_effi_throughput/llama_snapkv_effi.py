@@ -57,7 +57,7 @@ if __name__ == "__main__":
     replace_llama("snapkv")
 
     device = torch.device("cuda:0")
-    model_name = "/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/"
+    model_name = "meta-llama/Llama-3.2-3B"
 
     config = AutoConfig.from_pretrained(model_name)
     config._attn_implementation = "eager"  # ✅ Enable FlashAttention 2

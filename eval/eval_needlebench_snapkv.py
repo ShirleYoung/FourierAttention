@@ -16,9 +16,9 @@ is_single_niah = (len([key for key in list(locals()) if key.__contains__('parall
 
 models = [
     dict(
-        abbr='llama3.1_8b-pyramidsnapkv-needlebench-2',
+        abbr='llama3.1_8b-pyramidsnapkv-needlebench',
         type=PyramidKVModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.1-8B/",
+        path="meta-llama/Llama-3.1-8B",
         max_out_len=50 if is_single_niah else 250,
         max_seq_len=409600,
         batch_size=1,
@@ -29,9 +29,9 @@ models = [
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr='llama3.2_3b-pyramidsnapkv-needlebench-2',
+        abbr='llama3.2_3b-pyramidsnapkv-needlebench',
         type=PyramidKVModel,
-        path="/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/",
+        path="meta-llama/Llama-3.2-3B",
         max_out_len=50 if is_single_niah else 250,
         max_seq_len=409600,
         batch_size=1,
@@ -43,7 +43,7 @@ models = [
     ),
 ]
 
-work_dir = './outputs/pyramidsnapkv-needlebench-2/'
+work_dir = './outputs/pyramidsnapkv-needlebench/'
 
 infer = dict(
     partitioner=dict(type=NaivePartitioner),  # dict(type=NumWorkerPartitioner, num_worker=4),
