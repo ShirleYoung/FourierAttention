@@ -31,7 +31,7 @@ def model_gen(model, input_ids, max_new_tokens):
             generated_sequence = torch.cat([generated_sequence, input_ids], dim=-1)
             past_key_values = outputs.past_key_values
 
-            # ✅ Corrected check for batch inputs
+            # Corrected check for batch inputs
             if torch.any(input_ids == eos_token_id):
                 break
 
@@ -54,7 +54,7 @@ def throughput_test(model, input_ids, max_new_tokens, eos_token_id, batch_size, 
 if __name__ == "__main__":
     device = torch.device("cuda:0")
 
-    model_path = "/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/Palu/Llama3_2_3b_ratio-0.7_gs-4-fisher_uniform-whiten"
+    model_path = "" #path to the model compressed by Palu
     model, tokenizer = load_model_and_tokenizer(model_path, use_flash_attn2=False)
     model = model.to(device)
 

@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/Palu")
+sys.path.append("/path/to/Palu")
 
 import os
 import torch
@@ -7,7 +7,7 @@ from typing import List, Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from opencompass.models.base import BaseModel
 from opencompass.utils.logging import get_logger
-from utils import load_model_and_tokenizer  # 使用你已有的工具函数
+from utils import load_model_and_tokenizer   # use utils from Palu 
 
 class PaluCausalLM(BaseModel):
     def __init__(self,
@@ -23,7 +23,6 @@ class PaluCausalLM(BaseModel):
         self.end_str = end_str
         self.max_out_len = max_out_len
 
-        # 加载模型和 tokenizer
         self.model, self.tokenizer = load_model_and_tokenizer(path)
         self.tokenizer.pad_token_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id
         self.model.eval()
