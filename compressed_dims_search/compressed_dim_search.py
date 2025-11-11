@@ -411,10 +411,7 @@ def main():
 
 
     file_paths = [
-        '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multikey_1_4k.json',
-        '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multikey_2_4k.json',
-        '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multikey_3_4k.json',
-        '/remote-home1/qqwang/outputs/Llama-3.2-3B-ruler/20250430_110126/predictions/Llama-3.2-3B-ruler/ruler_niah_multivalue_4k.json',
+        # your path to your context
     ]
 
     # 用于保存所有提取出的origin_prompt

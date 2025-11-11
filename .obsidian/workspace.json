@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "README.md",
-                "mode": "preview",
+                "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
@@ -171,6 +171,7 @@
   },
   "active": "8f1eabc89e741c88",
   "lastOpenFiles": [
+    "compressed_dims_search/compressed_dim_search.py",
     "img/longbench.png",
     "img/needlebench2.png",
     "img/needlebench1.png",

@@ -42,6 +42,13 @@ triton==3.3.0
 Copy the files in folder `FourierAttention/models/` to `opencompass/models/` and change `opencompass/models/__init__.py` with our file `FourierAttention/models/__init__.py`.
 
 
+## Search compressed_dims
+If you want to search compressed_dims for a new model(we now have compressed_dims for llama3.1-8b and llama3.2-3b), please use your own context and execute the following command.
+```bash
+python compressed_dims_search/compressed_dims_search.py
+```
+
+
 ## Evaluation
 
 Copy the folder `FourierAttention/eval/` to your OpenCompass directory and then you can try the following evaluations.
