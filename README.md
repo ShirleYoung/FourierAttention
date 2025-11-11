@@ -147,7 +147,7 @@ python FourierAttention/memory_effi_throughput/llama_fourier_mem.py
 <p>
 
 <p align="center">
-<img src="./img/effi.png" width="750"/>
+<img src="./img/efficiency.png" width="750"/>
 <p>
 
 ## Citation
