@@ -4,7 +4,7 @@
 
 Xiaoran Liu<sup>1,2*</sup>, Siyang He<sup>1,2*</sup>, Qiqi Wang<sup>1,2*</sup>, Ruixiao Li<sup>1,2*</sup>, Yuerong Song<sup>1,2</sup>, Zhigeng Liu<sup>1,2</sup>,
 
-Mianqiu Huang<sup>2</sup>, Zengfeng Huang<sup>1,2</sup>, Qipeng Guo<sup>2,3</sup>, Ziwei He<sup>2,†</sup>, Xipeng Qiu<sup>1,2,†</sup>
+Mianqiu Huang<sup>2</sup>, Zengfeng Huang<sup>1,2</sup>, Qipeng Guo<sup>2,3</sup>, Ziwei He<sup>2†</sup>, Xipeng Qiu<sup>1,2†</sup>
 
 <sup>1</sup> Fudan Univerisity, <sup>2</sup>Shanghai Innovation Institute, <sup>3</sup>Shanghai AI Laboratory
 
