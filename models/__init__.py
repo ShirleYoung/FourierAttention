@@ -52,17 +52,27 @@ from .zhipuai_v2_api import ZhiPuV2AI  # noqa: F401
 # from .hippoattn import HippoattnCausalLM
 # from .streamingllm import StreamingModel
 # from .pyramidkv import PyramidKVModel
-# from .snapkv import SnapKVCausalLM
-# from .palu import PaluCausalLM
+# from .snapkv import SnapKVCausalLMs
+from .palu import PaluCausalLM
+
 import os
 model_type = os.getenv("MODEL_TYPE")
-if model_type == "streaming":
-    from .streamingllm import StreamingModel
+if model_type == "fouriernew" :
+    from .fourier import FourierModel
+    from .fourier_wotri import FourierModelWOT
 elif model_type == "pyramid":
     from .pyramidkv import PyramidKVModel
-elif model_type == "snap":
-    from .snapkv import SnapKVCausalLM
-elif model_type == "palu":
-    from .palu import PaluCausalLM
-elif model_type == "mamba":
-    from .mamba import MambaModel
+
+# if model_type == "streaming":
+#     from .streamingllm import StreamingModel
+# elif model_type == "pyramid":
+#     from .pyramidkv import PyramidKVModel
+# elif model_type == "snap":
+#     from .snapkv import SnapKVCausalLM
+# elif model_type == "palu":
+#     from .palu import PaluCausalLM
+# elif model_type == "mamba":
+#     from .mamba import MambaModel
+# elif model_type == "fourier":
+# from .fourier import FourierModel
+# from .fourier_wotri import FourierModelWOT

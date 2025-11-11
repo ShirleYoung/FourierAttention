@@ -1,4 +1,4 @@
-from opencompass.models import HippoattnCausalLM
+from opencompass.models import FourierModel
 from mmengine.config import read_base
 from opencompass.partitioners import NaivePartitioner
 from opencompass.runners import LocalRunner
@@ -15,52 +15,56 @@ datasets = ruler_datasets
 
 models = [
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler4k-uniform',
-        type=HippoattnCausalLM,
+        abbr = 'llama3_2-3b-fourier-ruler4k-uniform',
+        type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_uniform.json"
+        generation_kwargs=dict(),
+        non_critical_dims_path=" ", #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_uniform_splithead.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler4k-fourier',
-        type=HippoattnCausalLM,
+        abbr = 'llama3_2-3b-fourier-ruler4k-fourier',
+        type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier.json"
+        generation_kwargs=dict(),
+        non_critical_dims_path=" ", #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier_splithead.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-kvinverse',
-        type=HippoattnCausalLM,
+        abbr = 'llama3_2-3b-fourier-ruler-kvinverse',
+        type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_kv-inverse.json"
+        generation_kwargs=dict(),
+        non_critical_dims_path=" ", #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_kv-inverse_splithead.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourierhippo-ruler-layerinverse',
-        type=HippoattnCausalLM,
+        abbr = 'llama3_2-3b-fourier-ruler-layerinverse',
+        type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
         max_out_len=100,
         max_seq_len=4096,
         batch_size=1,
-        generation_kwargs=dict(maxlocallen=1024, maxmidstates=1024, numinittokens=4, non_critical_dims_path=" "), #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_layer-inverse.json"
+        generation_kwargs=dict(),
+        non_critical_dims_path=" ", #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_layer-inverse_splithead.json"
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
 ]
 
-work_dir ='outputs/llama3_2-3b-fourierhippo-ruler4k-ablation'
+work_dir ='outputs/llama3_2-3b-fourier-ruler4k-ablation'
 
 infer = dict(
     partitioner=dict(type=NaivePartitioner),  # dict(type=NumWorkerPartitioner, num_worker=4),

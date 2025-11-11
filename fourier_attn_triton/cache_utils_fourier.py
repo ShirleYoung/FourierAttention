@@ -8,16 +8,26 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from packaging import version
 
-from .configuration_utils import PretrainedConfig
-from .utils import (
+from transformers.configuration_utils import PretrainedConfig
+from transformers.utils import (
     is_hqq_available,
     is_optimum_quanto_available,
-    is_quanto_available,
+    # is_quanto_available,
     is_torchdynamo_compiling,
     logging,
 )
-from .utils.deprecation import deprecate_kwarg
+from transformers.utils.deprecation import deprecate_kwarg
 import numpy as np
+
+# --- compatibility patch for new transformers versions ---
+import importlib.util
+
+try:
+    from transformers.utils import is_quanto_available  # old versions
+except ImportError:
+    def is_quanto_available():
+        return importlib.util.find_spec("quanto") is not None
+# ---------------------------------------------------------
 
 
 if is_hqq_available():
@@ -348,8 +358,8 @@ class StaticCacheConfig(CacheConfig):
                 ),
             )
 
-# from .fourier_triton import MultiDimHiPPO, mat_fourier_avg_scale_triton
-from .hippo_function_approx_legt_fourier_awq import MultiDimHiPPO
+from lxr_fourier_triton_valid4_v2 import MultiDimHiPPO2, mat_fourier_avg_std_triton, mat_avg_std_triton
+
 class DynamicCache(Cache):
     """
     A cache that grows dynamically as more tokens are generated. This is the default for generative models.
@@ -405,10 +415,19 @@ class DynamicCache(Cache):
         self.v_scale = []
         self.k_layer_average = []
         self.v_layer_average = []
-        
+        self.kd_layer_average = []
+        self.vd_layer_average = []
+
         # 初始化为空列表，用于存储每一层的 k_non_critical_dims 和 v_non_critical_dims        
         self.k_non_critical_dims = []
+        self.k_non_critical_head_dims = []
+        self.k_critical_dims = []
+        self.k_critical_head_dims = []
+
         self.v_non_critical_dims = []
+        self.v_non_critical_head_dims = []
+        self.v_critical_dims = []
+        self.v_critical_head_dims = []
 
         # 遍历每一层并拼接数据
         for layer_idx in range(len(non_critical_dims)):
@@ -417,12 +436,21 @@ class DynamicCache(Cache):
 
             if layer_key in non_critical_dims:
                 # 拼接当前层的 k_proj 和 v_proj
-                self.k_non_critical_dims.append(non_critical_dims[layer_key]["self_attn.k_proj"])
-                self.k_scale.append(torch.ones(len(non_critical_dims[layer_key]["self_attn.k_proj"])))
-                self.k_layer_average.append(torch.zeros(len(non_critical_dims[layer_key]["self_attn.k_proj"])))
-                self.v_non_critical_dims.append(non_critical_dims[layer_key]["self_attn.v_proj"])
-                self.v_scale.append(torch.ones(len(non_critical_dims[layer_key]["self_attn.v_proj"])))
-                self.v_layer_average.append(torch.zeros(len(non_critical_dims[layer_key]["self_attn.v_proj"])))
+                # self.k_non_critical_dims.append(non_critical_dims[layer_key]["kc_list"])
+                # self.k_critical_dims.append(non_critical_dims[layer_key]["kn_list"])
+                # self.v_non_critical_dims.append(non_critical_dims[layer_key]["vc_list"])
+                # self.v_critical_dims.append(non_critical_dims[layer_key]["vn_list"])
+
+                self.k_non_critical_dims.append(torch.tensor(non_critical_dims[layer_key]["kc_list"]).cuda())
+                self.k_critical_dims.append(torch.tensor(non_critical_dims[layer_key]["kn_list"]).cuda())
+                self.v_non_critical_dims.append(torch.tensor(non_critical_dims[layer_key]["vc_list"]).cuda())
+                self.v_critical_dims.append(torch.tensor(non_critical_dims[layer_key]["vn_list"]).cuda())
+
+                self.k_non_critical_head_dims.append(torch.tensor([0] + non_critical_dims[layer_key]["kc_h_list"]).cuda())
+                self.k_critical_head_dims.append(torch.tensor([0] + non_critical_dims[layer_key]["kn_h_list"]).cuda())
+                self.v_non_critical_head_dims.append(torch.tensor([0] + non_critical_dims[layer_key]["vc_h_list"]).cuda())
+                self.v_critical_head_dims.append(torch.tensor([0] + non_critical_dims[layer_key]["vn_h_list"]).cuda())
+
             else:
                 raise ValueError(f"Layer index {layer_idx} not found in non-critical dimensions JSON file.")
                 
@@ -430,82 +458,31 @@ class DynamicCache(Cache):
         # self.k_non_critical_dims = torch.stack([torch.tensor(dim) for dim in self.k_non_critical_dims])
         # self.v_non_critical_dims = torch.stack([torch.tensor(dim) for dim in self.v_non_critical_dims])
         # 由于每一层的非关键维度数目不一样，不能再使用torch的堆叠，遂用列表来代替
-        self.k_non_critical_dims = [dim for dim in self.k_non_critical_dims]
-        self.v_non_critical_dims = [dim for dim in self.v_non_critical_dims]
+        # self.k_non_critical_dims = [dim for dim in self.k_non_critical_dims]
+        # self.v_non_critical_dims = [dim for dim in self.v_non_critical_dims]
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         '''just for debug'''
         #self.final=torch.empty((0,0,0)).to("cuda")
 
+    # no use
     def __getitem__(self, layer_idx: int) -> List[Tuple[Dict[str, torch.Tensor]]]:  #有可能要加解压缩，现在还没干
         """
         Support for backwards-compatible `past_key_value` indexing, e.g. `past_key_value[0][0].shape[2]` to get the
         sequence length.
         """
-        if layer_idx < len(self):
-            if self.key_cache[layer_idx]["k_critical"].size(1)<=self.maxstates: 
-                k_decompressed=self.key_cache[layer_idx]["k_compressed"]
-                v_decompressed=self.value_cache[layer_idx]["v_compressed"]
-            else:
-                k_compressed=self.key_cache[layer_idx]["k_compressed"]
-                a, b, c = k_compressed.size()
-                k_compressed_reshaped = k_compressed.reshape(a, b * c)
-                k_compressed_unsqueezed=k_compressed_reshaped.unsqueeze(0) #变为(1,bs,base_N*input_dim)
-                k_decompressed= self.hippo.reconstruct(k_compressed_unsqueezed,self.key_cache[layer_idx]["k_critical"].size(1))
-                v_compressed=self.value_cache[layer_idx]["v_compressed"]
-                v_compressed_reshaped = v_compressed.reshape(a, b * c)
-                v_compressed_unsqueezed=v_compressed_reshaped.unsqueeze(0) #变为(1,bs,base_N*input_dim)
-                v_decompressed= self.hippo.reconstruct(v_compressed_unsqueezed,self.value_cache[layer_idx]["v_critical"].size(1))
+        pass
 
-
-            # 按照非关键维度的索引进行穿插式拼接
-            key_states = self._interleave(k_decompressed, self.key_cache[layer_idx]["k_critical"],1,layer_idx)
-            value_states = self._interleave(v_decompressed, self.value_cache[layer_idx]["v_critical"],0,layer_idx)
-            # print(f"穿插之后,key_states:{key_states.size()}")
-            # print(f"穿插之后,value_states:{value_states.size()}")   
-
-
-            bsz=key_states.shape[0]
-
-            key_states = key_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2)
-            value_states = value_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2) 
-            return (key_states, value_states)
-        else:
-            raise KeyError(f"Cache only has {len(self)} layers, attempted to access layer with index {layer_idx}")
-
+    # no use
     def __iter__(self):
         """
         Support for backwards-compatible `past_key_value` iteration, e.g. `for x in past_key_value:` to iterate over
         keys and values
         """
-        for layer_idx in range(len(self)):
-            if self.key_cache[layer_idx]["k_critical"].size(1)<=self.maxstates: 
-                k_decompressed=self.key_cache[layer_idx]["k_compressed"]
-                v_decompressed=self.value_cache[layer_idx]["v_compressed"]
-            else:
-                k_compressed=self.key_cache[layer_idx]["k_compressed"]
-                a, b, c = k_compressed.size()
-                k_compressed_reshaped = k_compressed.reshape(a, b * c)
-                k_compressed_unsqueezed=k_compressed_reshaped.unsqueeze(0) #变为(1,bs,base_N*input_dim)
-                k_decompressed= self.hippo.reconstruct(k_compressed_unsqueezed,self.key_cache[layer_idx]["k_critical"].size(1))
-                v_compressed=self.value_cache[layer_idx]["v_compressed"]
-                v_compressed_reshaped = v_compressed.reshape(a, b * c)
-                v_compressed_unsqueezed=v_compressed_reshaped.unsqueeze(0) #变为(1,bs,base_N*input_dim)
-                v_decompressed= self.hippo.reconstruct(v_compressed_unsqueezed,self.value_cache[layer_idx]["v_critical"].size(1))
+        pass
 
-            # 按照非关键维度的索引进行穿插式拼接
-            key_states = self._interleave(k_decompressed, self.key_cache[layer_idx]["k_critical"],1,layer_idx)
-            value_states = self._interleave(v_decompressed, self.value_cache[layer_idx]["v_critical"],0,layer_idx)
-            # print(f"穿插之后,key_states:{key_states.size()}")
-            # print(f"穿插之后,value_states:{value_states.size()}")    
-
-            bsz=key_states.shape[0]
-
-            key_states = key_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2)
-            value_states = value_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2) 
-            yield (key_states, value_states)
-
+    # no use
     def __len__(self):
         """
         Support for backwards-compatible `past_key_value` length, e.g. `len(past_key_value)`. This value corresponds
@@ -513,37 +490,7 @@ class DynamicCache(Cache):
         """
         return len(self.key_cache)
     
-    def _interleave(self, non_critical: torch.Tensor, critical: torch.Tensor,isk,layer_idx: int) -> torch.Tensor:
-        """
-        按照非关键维度的索引进行穿插式拼接。
-        将非关键维度的解压矩阵插入到关键维度矩阵的指定位置，保持原来的维度顺序。
-        """
-        # 创建一个新的张量，大小为非关键和关键维度拼接后的大小
-        seq_len = critical.size(1)
-        total_dim = critical.size(2) + non_critical.size(2)
-        # print(f"关键维度数目：{critical.size(2)}")
-        # print(f"非关键维度数目：{non_critical.size(2)}")
-        full_matrix = torch.zeros(critical.size(0), seq_len, total_dim, device=critical.device)
-        # print(f"full_matrix维度是{full_matrix.size()}")
-        # 插入非关键维度到指定位置
-        non_critical_idx = 0
-        if isk==1:
-            non_critical_indices = self.k_non_critical_dims[layer_idx]
-            full_matrix[:, :, non_critical_indices] = non_critical[:, :, :len(non_critical_indices)]
-            
-            # 插入关键维度到剩下的位置
-            critical_indices = [i for i in range(total_dim) if i not in non_critical_indices]
-            full_matrix[:, :, critical_indices] = critical[:, :, :]
-        if isk==0:
-            non_critical_indices = self.v_non_critical_dims[layer_idx]
-            full_matrix[:, :, non_critical_indices] = non_critical[:, :, :len(non_critical_indices)]
-            
-            # 插入关键维度到剩下的位置
-            critical_indices = [i for i in range(total_dim) if i not in non_critical_indices]
-            full_matrix[:, :, critical_indices] = critical[:, :, :]       
-
-        return full_matrix
-
+    # key
     def update(
         self,
         key_states: torch.Tensor,
@@ -567,8 +514,7 @@ class DynamicCache(Cache):
         Return:
             A tuple containing the updated key and value states.
         """
-        # print(f"self.maxnewtokens:{self.maxnewtokens}")
-        # print(f"现在是第{layer_idx}层！")
+
         isprefill=0
         # Update the number of seen tokens
         if layer_idx == 0:
@@ -580,41 +526,23 @@ class DynamicCache(Cache):
         bsz=key_states.shape[0]
         q_len=key_states.shape[-2]
 
-        # print(f"新加入的key_states形状为{key_states.size()}")
         key_states=key_states.permute(0, 2, 1, 3) 
         key_states = key_states.view(bsz, q_len, self.heads * self.head_dim)  # 变为不分头的形状
 
-        key_states_ori=key_states #可删 完全为了验证
-
-        '''just for debug'''
-        #self.final=torch.cat([self.final,key_states],dim=1)
         
         value_states=value_states.permute(0, 2, 1, 3) 
         value_states = value_states.view(bsz, q_len, self.heads * self.head_dim)
-        # print(f"新加入的key_states形状不分头之后为{key_states.size()}")
-        # print(f"新加入的value_states形状不分头之后为{value_states.size()}")
-
-        k_non_critical = key_states[:, :, self.k_non_critical_dims[layer_idx]] #(bs,seq_len,len(self.non_critical_dims))
-        v_non_critical = value_states[:, :, self.v_non_critical_dims[layer_idx]] #(bs,seq_len,len(self.non_critical_dims))
-        
-        # k_non_critical_dims_int = set(tensor.item() for tensor in self.k_non_critical_dims[layer_idx])
-        k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
-        k_critical_new = key_states[:, :, sorted(list(set(range(key_states.size(2))) - k_non_critical_dims_int))]
-        # print(f"新加入的k_critical_new(关键维度部分)形状为：{k_critical_new.size()}")
-        # v_non_critical_dims_int = set(tensor.item() for tensor in self.v_non_critical_dims[layer_idx])
-        v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
-        v_critical_new = value_states[:, :, sorted(list(set(range(value_states.size(2))) - v_non_critical_dims_int))]
 
 
         # Update the cache
         if len(self.key_cache) <= layer_idx:
-            # print(f"现在在第{layer_idx}层")
+            # print(f"现在在第{layer_idx}层的prefill阶段!")
             if layer_idx == 0: #刚prefill到第一层
                 self.prefilllen=q_len
                 self.maxtokens=min(self.prefilllen+self.maxnewtokens,self.maxtokens)
-                self.hippo = MultiDimHiPPO(
-                    N=len(self.k_non_critical_dims[layer_idx])*self.maxmidstates, #原本是0
-                    input_dim=len(self.k_non_critical_dims[layer_idx]), #原本是0
+                self.hippo = MultiDimHiPPO2(
+                    N=self.k_non_critical_dims[layer_idx].shape[0]*self.maxmidstates, #原本是0
+                    input_dim=self.k_non_critical_dims[layer_idx].shape[0], #原本是0
                     method='legt',
                     dt=1/(self.maxtokens-self.numinittokens-self.maxlocallen),
                     T=1
@@ -625,368 +553,202 @@ class DynamicCache(Cache):
                 self.key_cache.append([])
                 self.value_cache.append([])
             if q_len>self.maxlen: #序列长度大于inittoken数目+中间maxstates+局部窗口
-                k_init=k_non_critical[:,:self.numinittokens,:]
-                k_local=k_non_critical[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
-                k_tocompress=k_non_critical[:,self.numinittokens:-self.maxlocallen,:] 
+                k_init=key_states[:,:self.numinittokens,:]
+                k_local=key_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                k_mid=key_states[:,self.numinittokens:-self.maxlocallen,:] 
+                # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
+                k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
+                k_tocompress = k_mid[:, :, self.k_non_critical_dims[layer_idx]]
                 k_compressed=self.hippo(base_input=k_tocompress,token_num = self.curr_tokennum[layer_idx])
-                self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
-                bs=k_compressed.size(1)
-                # k_compressed_reshaped = k_compressed.view(1, bs, len(self.k_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # k_compressed_reshaped=k_compressed_reshaped.permute(0,1,3,2)
-                # k_compressed_squeezed = k_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                k_compressed_squeezed = k_compressed
-                #k_concat = torch.cat([k_init, k_compressed_squeezed, k_local], dim=1)
 
-                v_init=v_non_critical[:,:self.numinittokens,:]
-                v_local=v_non_critical[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
-                v_tocompress=v_non_critical[:,self.numinittokens:-self.maxlocallen,:]                 
+                u_avg, u_std = mat_avg_std_triton(k_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(k_compressed.contiguous(), k_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.k_scale.append((u_std / i_std).cuda())
+                self.k_layer_average.append((u_avg).cuda())
+                self.kd_layer_average.append((i_avg).cuda())
+                
+                bs=k_compressed.size(1)
+                # k_compressed_squeezed = k_compressed
+
+                v_init=value_states[:,:self.numinittokens,:]
+                v_local=value_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                v_mid=value_states[:,self.numinittokens:-self.maxlocallen,:] 
+                # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
+                v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
+                v_tocompress = v_mid[:, :, self.v_non_critical_dims[layer_idx]]            
                 v_compressed=self.hippo(base_input=v_tocompress,token_num = self.curr_tokennum[layer_idx])
                 # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
                 # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
                 # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                v_compressed_squeezed = v_compressed
+                # v_compressed_squeezed = v_compressed
+
+                u_avg, u_std = mat_avg_std_triton(v_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(v_compressed.contiguous(), v_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.v_scale.append((u_std / i_std).cuda())
+                self.v_layer_average.append((u_avg).cuda())
+                self.vd_layer_average.append((i_avg).cuda())
+
+                self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
                 #v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
                 # print(f"{layer_idx}在prefill阶段压缩得到的v_compressed_squeezed:{v_compressed_squeezed}")
-                self.key_cache.append({"k_compressed":(k_init,k_compressed_squeezed, k_local),"k_critical":k_critical_new})
-                self.value_cache.append({"v_compressed":(v_init, v_compressed_squeezed, v_local),"v_critical":v_critical_new})
+                self.key_cache.append({"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local})
+                self.value_cache.append({"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local})
             else:
                 # k_compressed=k_non_critical
                 # v_compressed=v_non_critical
-                if q_len>=self.numinittokens+self.maxlocallen:
-                    k_init=k_non_critical[:,:self.numinittokens,:]
-                    k_local=k_non_critical[:,-self.maxlocallen:,:]
-                    k_mid=k_non_critical[:,self.numinittokens:-self.maxlocallen,:]
-                    v_init=v_non_critical[:,:self.numinittokens,:]
-                    v_local=v_non_critical[:,-self.maxlocallen:,:]
-                    v_mid=v_non_critical[:,self.numinittokens:-self.maxlocallen,:]
-                    self.key_cache.append({"k_compressed":(k_init,k_mid,k_local),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_init,v_mid,v_local),"v_critical":v_critical_new})
-                elif q_len>=self.numinittokens:
-                    k_init=k_non_critical[:,:self.numinittokens,:]
-                    k_local=k_non_critical[:,self.numinittokens:,:]
-                    v_init=v_non_critical[:,:self.numinittokens,:]
-                    v_local=v_non_critical[:,self.numinittokens:,:]
-                    self.key_cache.append({"k_compressed":(k_init,torch.empty((k_init.size(0), 0, k_init.size(2))),k_local),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_init,torch.empty((v_init.size(0), 0, v_init.size(2))),v_local),"v_critical":v_critical_new})
-                else:
-                    self.key_cache.append({"k_compressed":(k_non_critical,torch.empty((k_non_critical(0), 0, k_non_critical(2))),torch.empty((k_non_critical(0), 0, k_non_critical(2)))),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_non_critical,torch.empty((v_non_critical(0), 0, v_non_critical(2))),torch.empty((v_non_critical(0), 0, v_non_critical(2)))),"v_critical":v_critical_new})
+                k_init=torch.empty((key_states.size(0), 0, key_states.size(2)))
+                k_local=key_states
+                k_tocompress=torch.empty((key_states.size(0), 0, self.k_non_critical_dims[layer_idx].shape[0]))
+                k_uncompressed=torch.empty((key_states.size(0), 0, self.k_critical_dims[layer_idx].shape[0]))
+
+                v_init=torch.empty((value_states.size(0), 0, value_states.size(2)))
+                v_local=value_states
+                v_tocompress=torch.empty((v_init.size(0), 0, self.v_non_critical_dims[layer_idx].shape[0]))
+                v_uncompressed=torch.empty((v_init.size(0), 0, self.v_critical_dims[layer_idx].shape[0]))
+                self.key_cache.append({"k_init":k_init,"k_compressed":k_tocompress,"k_uncompressed":k_uncompressed,"k_local":k_local})
+                self.value_cache.append({"v_init":v_init,"v_compressed":v_tocompress,"v_uncompressed":v_uncompressed,"v_local":v_local})
+                
+            ret=({"k_init":None,"k_compressed":None,"k_uncompressed":None,"k_local":key_states},{"v_init":None,"v_compressed":None,"v_uncompressed":None,"v_local":value_states})
 
 
         elif len(self.key_cache[layer_idx]) == 0:  # fills previously skipped layers; checking for tensor causes errors，其实就是上面被跳过的层
-            isprefill=1
             if q_len>self.maxlen: #序列长度大于inittoken数目+中间maxstates+局部窗口
-                k_init=k_non_critical[:,:self.numinittokens,:]
-                k_local=k_non_critical[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
-                k_tocompress=k_non_critical[:,self.numinittokens:-self.maxlocallen,:] 
+                k_init=key_states[:,:self.numinittokens,:]
+                k_local=key_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                k_mid=key_states[:,self.numinittokens:-self.maxlocallen,:] 
+                # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
+                k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
+                k_tocompress = k_mid[:, :, self.k_non_critical_dims[layer_idx]]
                 k_compressed=self.hippo(base_input=k_tocompress,token_num = self.curr_tokennum[layer_idx])
-                self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
 
+                u_avg, u_std = mat_avg_std_triton(k_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(k_compressed.contiguous(), k_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.k_scale[layer_idx] = (u_std / i_std).cuda()
+                self.k_layer_average[layer_idx] = u_avg.cuda()
+                self.kd_layer_average[layer_idx] = i_avg.cuda()
+                
                 bs=k_compressed.size(1)
-                # k_compressed_reshaped = k_compressed.view(1, bs, len(self.k_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # k_compressed_reshaped=k_compressed_reshaped.permute(0,1,3,2)
-                # k_compressed_squeezed = k_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                k_compressed_squeezed = k_compressed
-                #k_concat = torch.cat([k_init, k_compressed_squeezed, k_local], dim=1)
+                # k_compressed_squeezed = k_compressed
 
-                v_init=v_non_critical[:,:self.numinittokens,:]
-                v_local=v_non_critical[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
-                v_tocompress=v_non_critical[:,self.numinittokens:-self.maxlocallen,:]                 
+                v_init=value_states[:,:self.numinittokens,:]
+                v_local=value_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                v_mid=value_states[:,self.numinittokens:-self.maxlocallen,:] 
+                # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
+                v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
+                v_tocompress = v_mid[:, :, self.v_non_critical_dims[layer_idx]]            
                 v_compressed=self.hippo(base_input=v_tocompress,token_num = self.curr_tokennum[layer_idx])
+
+                u_avg, u_std = mat_avg_std_triton(v_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(v_compressed.contiguous(), v_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.v_scale[layer_idx] = (u_std / i_std).cuda()
+                self.v_layer_average[layer_idx] = u_avg.cuda()
+                self.vd_layer_average[layer_idx] = i_avg.cuda()
                 # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
                 # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
                 # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                v_compressed_squeezed = v_compressed
+                # v_compressed_squeezed = v_compressed
+                self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
                 #v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
-                self.key_cache.append({"k_compressed":(k_init,k_compressed_squeezed, k_local),"k_critical":k_critical_new})
-                self.value_cache.append({"v_compressed":(v_init, v_compressed_squeezed, v_local),"v_critical":v_critical_new})
+                # print(f"{layer_idx}在prefill阶段压缩得到的v_compressed_squeezed:{v_compressed_squeezed}")
+                self.key_cache[layer_idx]={"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local}
+                self.value_cache[layer_idx]={"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local}
             else:
                 # k_compressed=k_non_critical
                 # v_compressed=v_non_critical
-                if q_len>=self.numinittokens+self.maxlocallen:
-                    k_init=k_non_critical[:,:self.numinittokens,:]
-                    k_local=k_non_critical[:,-self.maxlocallen:,:]
-                    k_mid=k_non_critical[:,self.numinittokens:-self.maxlocallen,:]
-                    v_init=v_non_critical[:,:self.numinittokens,:]
-                    v_local=v_non_critical[:,-self.maxlocallen:,:]
-                    v_mid=v_non_critical[:,self.numinittokens:-self.maxlocallen,:]
-                    self.key_cache.append({"k_compressed":(k_init,k_mid,k_local),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_init,v_mid,v_local),"v_critical":v_critical_new})
-                elif q_len>=self.numinittokens:
-                    k_init=k_non_critical[:,:self.numinittokens,:]
-                    k_local=k_non_critical[:,self.numinittokens:,:]
-                    v_init=v_non_critical[:,:self.numinittokens,:]
-                    v_local=v_non_critical[:,self.numinittokens:,:]
-                    self.key_cache.append({"k_compressed":(k_init,torch.empty((k_init.size(0), 0, k_init.size(2))),k_local),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_init,torch.empty((v_init.size(0), 0, v_init.size(2))),v_local),"v_critical":v_critical_new})  #这个是有问题的 不是append
-                else:
-                    self.key_cache.append({"k_compressed":(k_non_critical,torch.empty((k_non_critical(0), 0, k_non_critical(2))),torch.empty((k_non_critical(0), 0, k_non_critical(2)))),"k_critical":k_critical_new})
-                    self.value_cache.append({"v_compressed":(v_non_critical,torch.empty((v_non_critical(0), 0, v_non_critical(2))),torch.empty((v_non_critical(0), 0, v_non_critical(2)))),"v_critical":v_critical_new})
+                k_init=torch.empty((key_states.size(0), 0, key_states.size(2)))
+                k_local=key_states
+                k_tocompress=torch.empty((key_states.size(0), 0, self.k_non_critical_dims[layer_idx].shape[0]))
+                k_uncompressed=torch.empty((key_states.size(0), 0, self.k_critical_dims[layer_idx].shape[0]))
 
+                v_init=torch.empty((value_states.size(0), 0, value_states.size(2)))
+                v_local=value_states
+                v_tocompress=torch.empty((v_init.size(0), 0, self.v_non_critical_dims[layer_idx].shape[0]))
+                v_uncompressed=torch.empty((v_init.size(0), 0, self.v_critical_dims[layer_idx].shape[0]))
+                self.key_cache[layer_idx]={"k_init":k_init,"k_compressed":k_tocompress,"k_uncompressed":k_uncompressed,"k_local":k_local}
+                self.value_cache[layer_idx]={"v_init":v_init,"v_compressed":v_tocompress,"v_uncompressed":v_uncompressed,"v_local":v_local}
+                
+            ret=({"k_init":None,"k_compressed":None,"k_uncompressed":None,"k_local":key_states},{"v_init":None,"v_compressed":None,"v_uncompressed":None,"v_local":value_states})
+
+                    
         else:
-            print(f"现在在生成阶段！！！")
-            k_compressed, k_critical = self.key_cache[layer_idx]["k_compressed"], self.key_cache[layer_idx]["k_critical"]
-            v_compressed, v_critical = self.value_cache[layer_idx]["v_compressed"], self.value_cache[layer_idx]["v_critical"]
-            # print(f"之前的k_compressed的中间部分：{k_compressed[1].size()}")
-            # print(f"之前的k_critical：{k_critical.size()}")
-            # print(f"之前的v_compressed的中间部分：{v_compressed[1].size()}")
-            # print(f"之前的v_critical：{v_critical.size()}")
-
-            # 将新的k_critical_new和v_critical_new]附加到之前的k_critical和v_critical矩阵的最后
-            k_critical = torch.cat([k_critical, k_critical_new], dim=1)
-            v_critical = torch.cat([v_critical, v_critical_new], dim=1)
-            # print(f"该层新的关键维度矩阵：{k_critical.size()}")
-            # print(f"该层新的关键维度矩阵：{v_critical.size()}")
-
-            q_len=k_critical.size(1)
+            k_init,k_compressed,k_uncompressed,k_local=self.key_cache[layer_idx]["k_init"],self.key_cache[layer_idx]["k_compressed"],self.key_cache[layer_idx]["k_uncompressed"],self.key_cache[layer_idx]["k_local"]
+            v_init,v_compressed,v_uncompressed,v_local=self.value_cache[layer_idx]["v_init"],self.value_cache[layer_idx]["v_compressed"],self.value_cache[layer_idx]["v_uncompressed"],self.value_cache[layer_idx]["v_local"]
+            q_len=k_init.size(1)+k_compressed.size(1)+k_uncompressed.size(1)+k_local.size(0)+1
             if q_len<=self.maxlen:
-                if q_len>self.numinittokens+self.maxlocallen: #局部窗口满了
-                    # k_compressed_midstates = torch.cat([k_compressed[1],k_compressed[2][:,0:1,:]], dim=1)
-                    # v_compressed_midstates = torch.cat([v_compressed[1],v_compressed[2][:,0:1,:]], dim=1) #中间段右进
-                    # k_compressed_local = torch.cat([k_compressed[2],k_non_critical], dim=1)
-                    # k_compressed_local=k_compressed_local[:,1:,:] #局部窗口右进左出
-                    # v_compressed_local = torch.cat([v_compressed[2],v_non_critical], dim=1)
-                    # v_compressed_local=v_compressed_local[:,1:,:]
-                    # self.key_cache[layer_idx]["k_compressed"]=(k_compressed[0],k_compressed_midstates,k_compressed_local)
-                    # self.value_cache[layer_idx]["v_compressed"]=(v_compressed[0],v_compressed_midstates,v_compressed_local)
-                    device = k_compressed[1].device  # 假设以 k_compressed[1] 的设备为基准
-
-                    k_compressed_midstates = torch.cat([
-                        k_compressed[1].to(device),
-                        k_compressed[2][:, 0:1, :].to(device)
-                    ], dim=1)
-
-                    v_compressed_midstates = torch.cat([
-                        v_compressed[1].to(device),
-                        v_compressed[2][:, 0:1, :].to(device)
-                    ], dim=1)
-
-                    k_compressed_local = torch.cat([
-                        k_compressed[2].to(device),
-                        k_non_critical.to(device)
-                    ], dim=1)
-                    k_compressed_local = k_compressed_local[:, 1:, :]  # 局部窗口右进左出
-
-                    v_compressed_local = torch.cat([
-                        v_compressed[2].to(device),
-                        v_non_critical.to(device)
-                    ], dim=1)
-                    v_compressed_local = v_compressed_local[:, 1:, :]
-
-                    self.key_cache[layer_idx]["k_compressed"] = (
-                        k_compressed[0].to(device),
-                        k_compressed_midstates,
-                        k_compressed_local
-                    )
-                    self.value_cache[layer_idx]["v_compressed"] = (
-                        v_compressed[0].to(device),
-                        v_compressed_midstates,
-                        v_compressed_local
-                    )
-
-                else: #局部窗口还可以继续塞
-                    k_compressed_local = torch.cat([k_compressed[2],k_non_critical], dim=1)
-                    v_compressed_local = torch.cat([v_compressed[2],v_non_critical], dim=1)                    
-                    self.key_cache[layer_idx]["k_compressed"]=(k_compressed[0],k_compressed[1],k_compressed_local)
-                    self.value_cache[layer_idx]["v_compressed"]=(v_compressed[0],v_compressed[1],v_compressed_local)
-                self.key_cache[layer_idx]["k_critical"]=k_critical
-                self.value_cache[layer_idx]["v_critical"]=v_critical 
+                k_local = torch.cat([k_local,key_states], dim=1)
+                v_local = torch.cat([v_local,value_states], dim=1)                 
+                self.key_cache[layer_idx]["k_local"]=k_local
+                self.value_cache[layer_idx]["v_local"]=v_local
+                ret=({"k_init":None,"k_compressed":None,"k_uncompressed":None,"k_local":k_local},{"v_init":None,"v_compressed":None,"v_uncompressed":None,"v_local":v_local})
 
             elif q_len==self.maxlen+1:
-                k_tocompress = torch.cat([k_compressed[1],k_compressed[2][:,0:1,:]], dim=1)
-                # print(f"送入hippo压缩之前的k_tocompress：{k_tocompress.size()}") #中间段右进
-                k_compressed_local = torch.cat([k_compressed[2],k_non_critical], dim=1)
-                k_compressed_local=k_compressed_local[:,1:,:] #局部窗口右进左出
+                k_local = torch.cat([k_local,key_states], dim=1)
+                v_local = torch.cat([v_local,value_states], dim=1)
+                ret=({"k_init":None,"k_compressed":None,"k_uncompressed":None,"k_local":k_local},{"v_init":None,"v_compressed":None,"v_uncompressed":None,"v_local":v_local})
 
-                k_mid_compressed =self.hippo(base_input=k_tocompress,token_num = self.curr_tokennum[layer_idx]) #中间段压缩
+                k_init=k_local[:,:self.numinittokens,:]
+                k_mid=k_local[:,self.numinittokens:-self.maxlocallen,:] 
+                k_local=k_local[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
+                k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
+                k_tocompress = k_mid[:, :, self.k_non_critical_dims[layer_idx]]
+                k_compressed=self.hippo(base_input=k_tocompress,token_num = self.curr_tokennum[layer_idx])
+
+                u_avg, u_std = mat_avg_std_triton(k_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(k_compressed.contiguous(), k_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.k_scale.append((u_std / i_std).cuda())
+                self.k_layer_average.append(u_avg.cuda())
+                self.kd_layer_average.append(i_avg.cuda())
+                
+                bs=k_compressed.size(1)
+
+                v_init=v_local[:,:self.numinittokens,:]
+                v_mid=v_local[:,self.numinittokens:-self.maxlocallen,:] 
+                v_local=v_local[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
+                v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
+                v_tocompress = v_mid[:, :, self.v_non_critical_dims[layer_idx]]            
+                v_compressed=self.hippo(base_input=v_tocompress,token_num = self.curr_tokennum[layer_idx])
+
+                u_avg, u_std = mat_avg_std_triton(v_tocompress.contiguous())
+                i_avg, i_std = mat_fourier_avg_std_triton(v_compressed.contiguous(), v_tocompress.size(1), 
+                                                          T=self.maxtokens-self.numinittokens-self.maxlocallen)
+                self.v_scale.append((u_std / i_std).cuda())
+                self.v_layer_average.append(u_avg.cuda())
+                self.vd_layer_average.append(i_avg.cuda())
+
+
                 self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
 
-                bs=k_mid_compressed.size(1)
-                # k_compressed_reshaped = k_mid_compressed.view(1, bs, len(self.k_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # k_compressed_reshaped=k_compressed_reshaped.permute(0,1,3,2)
-                # k_compressed_squeezed = k_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                k_compressed_squeezed = k_mid_compressed
-                
-                v_tocompress = torch.cat([v_compressed[1],v_compressed[2][:,0:1,:]], dim=1)
-                v_compressed_local = torch.cat([v_compressed[2],v_non_critical], dim=1)
-                v_compressed_local=v_compressed_local[:,1:,:] #局部窗口右进左出                
-                v_mid_compressed =self.hippo(base_input=v_tocompress,token_num = self.curr_tokennum[layer_idx])
-                # v_compressed_reshaped = v_mid_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
-                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                v_compressed_squeezed = v_mid_compressed
-
-                self.key_cache[layer_idx]["k_compressed"]=(k_compressed[0],k_compressed_squeezed,k_compressed_local)
-                self.key_cache[layer_idx]["k_critical"]=k_critical
-                self.value_cache[layer_idx]["v_compressed"]=(v_compressed[0],v_compressed_squeezed,v_compressed_local)
-                self.value_cache[layer_idx]["v_critical"]=v_critical 
+                self.key_cache.append({"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local})
+                self.value_cache.append({"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local})
 
             else:
                 self.curr_tokennum[layer_idx] += 1
-                k_mid_compressed = self.hippo(base_input=k_compressed[1], token_num = self.curr_tokennum[layer_idx],slice_input=k_compressed[2][:,0:1,:]) 
-                bs=k_mid_compressed.size(0)
-                # k_compressed_reshaped = k_mid_compressed.view(1, bs, len(self.k_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # k_compressed_reshaped=k_compressed_reshaped.permute(0,1,3,2)
-                # k_compressed_squeezed = k_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                k_compressed_squeezed = k_mid_compressed
-                k_compressed_local = torch.cat([k_compressed[2],k_non_critical], dim=1)
-                k_compressed_local=k_compressed_local[:,1:,:] #局部窗口右进左出
+                k_compressed = self.hippo(base_input=k_compressed, token_num = self.curr_tokennum[layer_idx],slice_input=k_local[:,0:1,self.k_non_critical_dims[layer_idx]]) 
+                # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
+                k_uncompressed = torch.cat([k_uncompressed,k_local[:, 0:1, self.k_critical_dims[layer_idx]]], dim=1)
+                k_local = torch.cat([k_local,key_states], dim=1)
+                k_local=k_local[:,1:,:] #局部窗口右进左出
 
-                v_mid_compressed = self.hippo(v_compressed[1],token_num = self.curr_tokennum[layer_idx],slice_input=v_compressed[2][:,0:1,:]) 
-                # v_compressed_reshaped = v_mid_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
-                # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
-                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
-                v_compressed_squeezed = v_mid_compressed
-                v_compressed_local = torch.cat([v_compressed[2],v_non_critical], dim=1)
-                v_compressed_local=v_compressed_local[:,1:,:] #局部窗口右进左出
+                v_compressed = self.hippo(v_compressed,token_num = self.curr_tokennum[layer_idx],slice_input=v_local[:,0:1,self.v_non_critical_dims[layer_idx]]) 
+                v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
+                v_uncompressed = torch.cat([v_uncompressed,v_local[:, 0:1, self.v_critical_dims[layer_idx]]], dim=1)
+                v_local = torch.cat([v_local,value_states], dim=1)
+                v_local=v_local[:,1:,:] #局部窗口右进左出
 
-                self.key_cache[layer_idx]["k_compressed"]=(k_compressed[0],k_compressed_squeezed,k_compressed_local)
-                self.key_cache[layer_idx]["k_critical"]=k_critical
-                self.value_cache[layer_idx]["v_compressed"]=(v_compressed[0],v_compressed_squeezed,v_compressed_local)
-                self.value_cache[layer_idx]["v_critical"]=v_critical 
+                self.key_cache[layer_idx]={"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local}
+                self.value_cache[layer_idx]={"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local}   
+
+                ret=({"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local},{"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local} )
         
-        #print(f"解压缩前再检查一遍，k_compressed_local的最后是否等于k_non_critical?{self.key_cache[layer_idx]['k_compressed'][2][:,-1:,:] == k_non_critical}")
-
-        if isprefill:
-            k_decompressed=k_non_critical
-            v_decompressed=v_non_critical
-            # print(f"现在是预填充")
-            if q_len>self.maxlen: 
-                k_decompressed_flourier = self.hippo.reconstruct(self.key_cache[layer_idx]["k_compressed"][1],self.key_cache[layer_idx]["k_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.k_non_critical_dims[layer_idx]))
-                v_decompressed_flourier = self.hippo.reconstruct(self.value_cache[layer_idx]["v_compressed"][1],self.value_cache[layer_idx]["v_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.v_non_critical_dims[layer_idx]))
-                # 这里存k_tocompress
-                # if layer_idx == 27:
-                #     with open('/remote-home1/qqwang/HippoAttention/rulersample_ktocompress_28.json', 'a') as json_file:
-                #         json.dump({layer_idx: k_tocompress.tolist()}, json_file)
-                #         json_file.write("\n")  # 每个保存数据后添加换行符，确保每次数据不会拼接在一起
-                # self.k_scale[layer_idx] = torch.sqrt(torch.var(k_decompressed_flourier[0, :, :] ,dim=0, unbiased=False)/torch.var(k_tocompress[0, :, :], dim=0, unbiased=False))
-                mean_decompressed = torch.mean(k_decompressed_flourier[0, :, :], dim=0, keepdim=True)
-                mean_tocompress = torch.mean(k_tocompress[0, :, :], dim=0, keepdim=True)
-                self.k_scale[layer_idx] = torch.max(torch.abs(k_decompressed_flourier[0, :, :] - mean_decompressed), dim=0).values / torch.max(torch.abs(k_tocompress[0, :, :] - mean_tocompress), dim=0).values
-                self.k_layer_average[layer_idx] = torch.mean(k_tocompress[0, :, :], dim=0) #可以优化
-                # print(f"原本的的是{k_tocompress}")
-                # print(f"傅里叶压缩解压缩之后的是{k_decompressed_flourier}")
-                # print(f"self.k_scale是{self.k_scale[layer_idx]}")
-                # print(f"self.k_layer_average是{self.k_layer_average[layer_idx]}，大小是{self.k_layer_average[layer_idx].size()}")
-                # self.v_scale[layer_idx] = torch.sqrt(torch.var(v_decompressed_flourier[0, :, :],dim=0, unbiased=False)/torch.var(v_tocompress[0, :, :],dim=0, unbiased=False))
-                mean_decompressed = torch.mean(v_decompressed_flourier[0, :, :], dim=0, keepdim=True)
-                mean_tocompress = torch.mean(v_tocompress[0, :, :], dim=0, keepdim=True)
-                self.v_scale[layer_idx] = torch.max(torch.abs(v_decompressed_flourier[0, :, :] - mean_decompressed), dim=0).values / torch.max(torch.abs(v_tocompress[0, :, :] - mean_tocompress), dim=0).values
-                self.v_layer_average[layer_idx] = torch.mean(v_tocompress[0, :, :], dim=0) 
-
-        elif self.key_cache[layer_idx]["k_critical"].size(1)<=self.maxlen: 
-            # k_decompressed=torch.cat([self.key_cache[layer_idx]["k_compressed"][0],self.key_cache[layer_idx]["k_compressed"][1],self.key_cache[layer_idx]["k_compressed"][2]],dim=1)
-            # v_decompressed=torch.cat([self.value_cache[layer_idx]["v_compressed"][0],self.value_cache[layer_idx]["v_compressed"][1],self.value_cache[layer_idx]["v_compressed"][2]],dim=1)
-            # 假设 device 已经定义为目标设备，例如:
-            device = torch.device("cuda")
-
-            # 将所有张量移动到 GPU 上
-            k_decompressed = torch.cat([
-                self.key_cache[layer_idx]["k_compressed"][0].to(device),
-                self.key_cache[layer_idx]["k_compressed"][1].to(device),
-                self.key_cache[layer_idx]["k_compressed"][2].to(device)
-            ], dim=1)
-
-            v_decompressed = torch.cat([
-                self.value_cache[layer_idx]["v_compressed"][0].to(device),
-                self.value_cache[layer_idx]["v_compressed"][1].to(device),
-                self.value_cache[layer_idx]["v_compressed"][2].to(device)
-            ], dim=1)
-
-        elif self.key_cache[layer_idx]["k_critical"].size(1)==self.maxlen+1:
-            k_decompressed =torch.cat([self.key_cache[layer_idx]["k_compressed"][0],k_tocompress,self.key_cache[layer_idx]["k_compressed"][2]],dim=1)
-            v_decompressed=torch.cat([self.value_cache[layer_idx]["v_compressed"][0],v_tocompress,self.value_cache[layer_idx]["v_compressed"][2]],dim=1)
-            k_decompressed_flourier = self.hippo.reconstruct(self.key_cache[layer_idx]["k_compressed"][1],self.key_cache[layer_idx]["k_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.k_non_critical_dims[layer_idx]))
-            v_decompressed_flourier = self.hippo.reconstruct(self.value_cache[layer_idx]["v_compressed"][1],self.value_cache[layer_idx]["v_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.v_non_critical_dims[layer_idx]))
-            # self.k_scale[layer_idx] = torch.sqrt(torch.var(k_decompressed_flourier[0, :, :] ,dim=0, unbiased=False)/torch.var(k_tocompress[0, :, :], dim=0, unbiased=False))
-            mean_decompressed = torch.mean(k_decompressed_flourier[0, :, :], dim=0, keepdim=True)
-            mean_tocompress = torch.mean(k_tocompress[0, :, :], dim=0, keepdim=True)
-            self.k_scale[layer_idx] = torch.max(torch.abs(k_decompressed_flourier[0, :, :] - mean_decompressed), dim=0).values / torch.max(torch.abs(k_tocompress[0, :, :] - mean_tocompress), dim=0).values
-            self.k_layer_average[layer_idx] = torch.mean(k_tocompress[0, :, :], dim=0) 
-            # print(f"self.k_scale是{self.k_scale[layer_idx].size()}")
-            # self.v_scale[layer_idx] = torch.sqrt(torch.var(v_decompressed_flourier[0, :, :],dim=0, unbiased=False)/torch.var(v_tocompress[0, :, :],dim=0, unbiased=False))
-            mean_decompressed = torch.mean(v_decompressed_flourier[0, :, :], dim=0, keepdim=True)
-            mean_tocompress = torch.mean(v_tocompress[0, :, :], dim=0, keepdim=True)
-            self.v_scale[layer_idx] = torch.max(torch.abs(v_decompressed_flourier[0, :, :] - mean_decompressed), dim=0).values / torch.max(torch.abs(v_tocompress[0, :, :] - mean_tocompress), dim=0).values
-            self.v_layer_average[layer_idx] = torch.mean(v_tocompress[0, :, :], dim=0) 
-        else:
-            print("现在在解压缩！！！")
-            # print(f"要输入解压缩的矩阵维度是：{k_mid_compressed.size()}")
-            # print(f"即将要解压缩的k_mid_compressed：{k_mid_compressed}")
-            k_decompressed = self.hippo.reconstruct(k_mid_compressed,self.key_cache[layer_idx]["k_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.k_non_critical_dims[layer_idx]))            
-            # print(f"刚刚解压缩好的 k_decompressed：{ k_decompressed}")
-            # import sys
-            # sys.exit(0)
-            v_decompressed = self.hippo.reconstruct(v_mid_compressed,self.key_cache[layer_idx]["k_critical"].size(1)-self.maxlocallen-self.numinittokens, len(self.v_non_critical_dims[layer_idx]))
-            bs=k_decompressed.size(0)
-            for i in range(bs):
-                # 获取第 i 个 batch 的 k_decompressed
-                data = k_decompressed[i, :, :]  # 形状为 [seq_len, input_dim]
-                
-                # 计算每个 input_dim 的平均值
-                means = data.mean(dim=0)  # 计算每个 input_dim 的平均值, 结果形状为 [input_dim]
-                # print(f"means:{means}")
-                
-                # 对每个 input_dim 进行操作：减去均值，乘以 k_scale，然后加回均值
-                data_centered = data - means  # 中心化
-                # print(f"data_centered:{data_centered}")
-                data_scaled = data_centered / self.k_scale[layer_idx]  # 按比例缩放
-                # print(f"self.k_scale[layer_idx]:{self.k_scale[layer_idx]}")
-                data_final = data_scaled + self.k_layer_average[layer_idx]  # 加回均值
-                # print(f"data_scaled:{data_scaled}")
-                # print(f"self.k_layer_average:{self.k_layer_average[layer_idx]}")
-
-                # 将结果赋回 k_decompressed
-                k_decompressed[i, :, :] = data_final
-                #这里存k_decompressed
-                # if layer_idx == 27:
-                #     with open('/remote-home1/qqwang/HippoAttention/rulersample_kdecompressed_28.json', 'a') as json_file:
-                #         json.dump({layer_idx: k_decompressed.tolist()}, json_file)
-                #         json_file.write("\n")  # 每个保存数据后添加换行符，确保每次数据不会拼接在一起
-                #     import sys
-                #     sys.exit()
-
-
-
-            for i in range(bs):
-                # 获取第 i 个 batch 的 v_decompressed
-                data = v_decompressed[i, :, :]  # 形状为 [seq_len, input_dim]
-                
-                # 计算每个 input_dim 的平均值
-                means = data.mean(dim=0)  # 计算每个 input_dim 的平均值, 结果形状为 [input_dim]
-                
-                # 对每个 input_dim 进行操作：减去均值，乘以 v_scale，然后加回均值
-                data_centered = data - means  # 中心化
-                data_scaled = data_centered / self.v_scale[layer_idx]  # 按比例缩放
-                data_final = data_scaled + self.v_layer_average[layer_idx]  # 加回均值
-
-                # 将结果赋回 k_decompressed
-                v_decompressed[i, :, :] = data_final
-
-            #print(f"scale之后k_decompressed:{k_decompressed}")
-            # import sys
-            # sys.exit(0)
-            k_decompressed=torch.cat([self.key_cache[layer_idx]["k_compressed"][0], k_decompressed, self.key_cache[layer_idx]["k_compressed"][2]], dim=1)
-            v_decompressed=torch.cat([self.value_cache[layer_idx]["v_compressed"][0], v_decompressed, self.value_cache[layer_idx]["v_compressed"][2]], dim=1)
-            #print("使用解压缩后的矩阵")
-            #print(f"解压缩后再检查一遍，k_decompressed的最后是否等于k_non_critical?{k_decompressed[:,-1:,:] == k_non_critical}")
-            # print(f"解压缩之后矩阵维度是：{k_decompressed.size()}")
-
-        # 按照非关键维度的索引进行穿插式拼接
-        key_states = self._interleave(k_decompressed, self.key_cache[layer_idx]["k_critical"],1,layer_idx)
-        value_states = self._interleave(v_decompressed, self.value_cache[layer_idx]["v_critical"],0,layer_idx)
-        # print(f"穿插之后,key_states:{key_states}")
-        # print(f"穿插之后,value_states:{value_states}")   
-        #print(f"最后一个token是不是正确：{key_states[:,-1:,:]==key_states_ori}")  
-        #print(f"********************最后的local窗口是否正确？{self.key_states[:,-self.maxlocallen:,:]==self.final[:,-self.maxlocallen:,:]}")
-        key_states = key_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2)
-        # print(f"预填充结束之后返回的key_states是否等于key_states_ori:{key_states==key_states_ori}") #为了验证
-        # print(f"预填充结束之后返回的key_states:{key_states}")
-        value_states = value_states.view(bsz, self._seen_tokens, self.heads, self.head_dim).transpose(1, 2)  
-        # import sys
-        # sys.exit()  # 这会停止程序的运行，为了验证
-        return key_states, value_states
-
+        return ret
+        
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         """Returns the sequence length of the cached states. A layer index can be optionally passed."""
         # TODO: deprecate this function in favor of `cache_position`
@@ -995,7 +757,7 @@ class DynamicCache(Cache):
             or len(self.key_cache) <= layer_idx  # skipped `layer_idx` and hasn't run a layer with cache after it
             or len(self.key_cache[layer_idx]) == 0  # the layer has no cache(被跳过了)
         )
-        layer_seq_length = self.key_cache[layer_idx]["k_critical"].shape[-2] if not is_empty_layer else 0
+        layer_seq_length = self.key_cache[layer_idx]["k_init"].shape[-2]+self.key_cache[layer_idx]["k_uncompressed"].shape[-2]+self.key_cache[layer_idx]["k_local"].shape[-2] if not is_empty_layer else 0
         return layer_seq_length
 
     def get_max_cache_shape(self) -> Optional[int]:
@@ -1077,14 +839,6 @@ class DynamicCache(Cache):
                 layer_values = torch.cat(value_cache, dim=0)
                 cache.update(layer_keys, layer_values, idx)
         return cache #先不动
-
-    def batch_repeat_interleave(self, repeats: int):
-        """Repeat the cache `repeats` times in the batch dimension. Used in contrastive search."""
-        for layer_idx in range(len(self)):
-            self.key_cache[layer_idx]["k_compressed"] = self.key_cache[layer_idx]["k_compressed"].repeat_interleave(repeats, dim=0)
-            self.key_cache[layer_idx]["k_critical"] = self.key_cache[layer_idx]["k_critical"].repeat_interleave(repeats, dim=0)
-            self.value_cache[layer_idx]["v_compressed"] = self.value_cache[layer_idx]["v_compressed"].repeat_interleave(repeats, dim=0)
-            self.value_cache[layer_idx]["v_critical"] = self.value_cache[layer_idx]["v_critical"].repeat_interleave(repeats, dim=0)
 
     def batch_select_indices(self, indices: torch.Tensor):
         """Only keep the `indices` in the batch dimension of the cache. Used in contrastive search."""

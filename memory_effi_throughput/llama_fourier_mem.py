@@ -57,7 +57,7 @@ def model_gen(model, config, input_ids, max_new_tokens):
 
     extra_config = ExtraConfig(max_new_tokens=max_new_tokens, numinittokens=4, maxlocallen=1020, 
                                maxmidstates=1024,  # 512 * 2
-                               non_critical_dims_path="/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_402/hippo_fourier/dimdifferjson_32k/non_critical_dims_hippofourier_kvdiffer6_512mid_splithead.json",
+                               non_critical_dims_path="", #your path to "/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_32k_1024states_splithead.json"
                                max_position_embeddings=config.max_position_embeddings, num_key_value_heads=config.num_key_value_heads, 
                                )
     past_key_values = DynamicCache(extra_config)
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     # os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
     device = torch.device("cuda:0")
-    model_name = "/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/"
+    model_name = "meta-llama/Llama-3.2-3B/"
     config = AutoConfig.from_pretrained(model_name)
 
     model = LlamaForCausalLM.from_pretrained(model_name, config=config, device_map=device, 

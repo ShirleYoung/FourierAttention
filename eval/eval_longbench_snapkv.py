@@ -67,7 +67,7 @@ models = [
     ),
 ]
 
-work_dir = './outputs/llama3.2_3b-pyramidsnapkv-longbench/'
+work_dir = './outputs/pyramidsnapkv-longbench/'
 
 
 infer = dict(

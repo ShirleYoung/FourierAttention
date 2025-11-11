@@ -60,7 +60,7 @@ if __name__ == "__main__":
     model_name = "meta-llama/Llama-3.2-3B"
 
     config = AutoConfig.from_pretrained(model_name)
-    config._attn_implementation = "eager"  # ✅ Enable FlashAttention 2
+    config._attn_implementation = "flash_attention_2"  # ✅ Enable FlashAttention 2
 
     model = LlamaForCausalLM.from_pretrained(
         model_name,

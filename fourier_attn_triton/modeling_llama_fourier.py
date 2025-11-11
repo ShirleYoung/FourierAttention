@@ -26,7 +26,7 @@ import torch.utils.checkpoint
 from torch import nn
 
 from transformers.activations import ACT2FN
-from cache_utils_fourier import Cache, DynamicCache, StaticCache
+from lxr_cache_utils_fourier import Cache, DynamicCache, StaticCache
 from transformers.generation import GenerationMixin
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
@@ -56,9 +56,22 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "meta-llama/Llama-2-7b-hf"
 _CONFIG_FOR_DOC = "LlamaConfig"
 
-from ela_naive_decoding import flash_decoding_parallel
+from lxr_fourier_triton_valid4_v2 import triton_fourier_attn, torch_fourier_attn
 
 from flash_attn.flash_attn_interface import flash_attn_func
+
+def _ensure_llama_compat(config):
+    if not hasattr(config, "mlp_bias"):
+        setattr(config, "mlp_bias", False)
+    if not hasattr(config, "pretraining_tp"):
+        setattr(config, "pretraining_tp", 1)
+    # if not hasattr(config, "rms_norm_eps"):
+    #     setattr(config, "rms_norm_eps", 1e-6)
+    # if not hasattr(config, "rope_theta"):
+    #     setattr(config, "rope_theta", 10000.0)
+    # if not hasattr(config, "attention_bias"):
+    #     setattr(config, "attention_bias", False)
+
 
 
 
@@ -234,12 +247,19 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 class LlamaMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+        # 在你的自定义模型 __init__ 的一开始调用
+        _ensure_llama_compat(config)
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
+        # self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
+        # self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
+        # self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
+        bias = getattr(config, "mlp_bias", False)
+        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
+        self.up_proj   = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
+        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=bias)
+
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -282,6 +302,8 @@ class LlamaAttention(nn.Module):
 
     def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
         super().__init__()
+        # 在你的自定义模型 __init__ 的一开始调用
+        _ensure_llama_compat(config)
         self.config = config
         self.layer_idx = layer_idx
         if layer_idx is None:
@@ -570,6 +592,7 @@ class LlamaSdpaAttention(LlamaAttention):
             )
 
         bsz, q_len, _ = hidden_states.size()
+        # print(f"q_len:{q_len}")
 
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
@@ -591,28 +614,53 @@ class LlamaSdpaAttention(LlamaAttention):
             cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        if past_key_value is not None:
+
+        if past_key_value is not None: #必经之路
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position} 
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        if q_len != 1:
+        if key_states["k_init"]==None and key_states["k_compressed"]==None and key_states["k_uncompressed"]==None:
+            #打印
+            # print(f"在if里query_states的大小是{query_states.size()}")
+            
+            key_states=key_states["k_local"]
+            value_states=value_states["v_local"]
+
             query_states = query_states.transpose(1, 2)
             key_states = key_states.view(key_states.size(0), key_states.size(1), self.num_key_value_heads, self.head_dim)
             value_states = value_states.view(value_states.size(0), value_states.size(1), self.num_key_value_heads, self.head_dim)
             attn_output = flash_attn_func(query_states.half(), key_states.half(), value_states.half(), causal=True)
 
-        else:
-            attn_output = flash_decoding_parallel(
-                q=query_states, k_il=key_states["k_il"].view(bsz, -1, self.num_key_value_heads, self.head_dim), v_il=value_states["v_il"].view(bsz, -1, self.num_key_value_heads, self.head_dim), 
-                k_zip=key_states["k_compressed"], v_zip=value_states["v_compressed"],
-                k_unzip=key_states["k_uncompressed"], v_unzip=value_states["v_uncompressed"],
-                k_unzip_per_q_head=past_key_value.num_non_compress_k_per_q_head[self.layer_idx],
-                v_unzip_per_q_head=past_key_value.num_non_compress_v_per_q_head[self.layer_idx],
-                T_scale=past_key_value.T,
-            )
 
-        attn_output = attn_output.view(bsz, q_len, -1)
+        else:
+            # torch_fourier_attn, triton_fourier_attn
+            #打印
+            # print(f"在else里query_states的大小是{query_states.size()}")
+            
+            attn_output = triton_fourier_attn(q=query_states.transpose(1, 2).view(bsz, q_len, self.num_heads * self.head_dim).contiguous(),
+                                              k_il=torch.cat([key_states["k_init"], key_states["k_local"]], dim=1).contiguous(), 
+                                              v_il=torch.cat([value_states["v_init"], value_states["v_local"]], dim=1).contiguous(), 
+                                              k_mc=key_states["k_compressed"], v_mc=value_states["v_compressed"], 
+                                              k_mn=key_states["k_uncompressed"], v_mn=value_states["v_uncompressed"], 
+                                              avg_k_u=past_key_value.k_layer_average[self.layer_idx], 
+                                              avg_k_d=past_key_value.kd_layer_average[self.layer_idx], scale_k=past_key_value.k_scale[self.layer_idx], 
+                                              avg_v_u=past_key_value.v_layer_average[self.layer_idx], 
+                                              avg_v_d=past_key_value.vd_layer_average[self.layer_idx], scale_v=past_key_value.v_scale[self.layer_idx], 
+                                              kc_list=past_key_value.k_non_critical_dims[self.layer_idx], 
+                                              kc_h_list=past_key_value.k_non_critical_head_dims[self.layer_idx], 
+                                              kn_list=past_key_value.k_critical_dims[self.layer_idx], 
+                                              kn_h_list=past_key_value.k_critical_head_dims[self.layer_idx], 
+                                              vc_list=past_key_value.v_non_critical_dims[self.layer_idx], 
+                                              vc_h_list=past_key_value.v_non_critical_head_dims[self.layer_idx], 
+                                              vn_list=past_key_value.v_critical_dims[self.layer_idx], 
+                                              vn_h_list=past_key_value.v_critical_head_dims[self.layer_idx], 
+                                              num_head_q=self.num_heads, num_head_kv=self.num_key_value_heads, 
+                                              seq_len_m=key_states["k_uncompressed"].size(1), 
+                                              T=past_key_value.maxtokens-past_key_value.numinittokens-past_key_value.maxlocallen)
+            attn_output = attn_output.transpose(1, 2).contiguous()
+
+        attn_output = attn_output.view(bsz, q_len, -1).to(query_states.dtype)
 
         attn_output = self.o_proj(attn_output)
 
@@ -898,9 +946,9 @@ class LlamaModel(LlamaPreTrainedModel):
         if use_cache and not isinstance(past_key_values, Cache):
             return_legacy_cache = True
             if past_key_values is None:
-                # this should not happen
-                past_key_values = DynamicCache(extra_config={"num_hidden_layers": 1})
+                past_key_values = DynamicCache()
             else:
+                # print("we are in else")
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
                 logger.warning_once(
                     "We detected that you are passing `past_key_values` as a tuple of tuples. This is deprecated and "
@@ -1111,6 +1159,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
 
     def __init__(self, config):
         super().__init__(config)
+        # 在你的自定义模型 __init__ 的一开始调用
+        _ensure_llama_compat(config)
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

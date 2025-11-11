@@ -71,10 +71,10 @@ def model_decode(model, config, extra_config, input_ids, past_key_values, max_ne
 
 def main():
     # --- Configuration ---
-    # MODEL_PATH = "/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.2-3B/" 
-    MODEL_PATH = "/inspire/hdd/ws-8207e9e2-e733-4eec-a475-cfa1c36480ba/embodied-multimodality/public/downloaded_ckpts/Llama-3.1-8B/" 
-    # NON_CRITICAL_DIMS_PATH = "/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_triton/fourier_attn_triton/local/jsonl/3b_non_compress_info.json"
-    NON_CRITICAL_DIMS_PATH = "/inspire/hdd/project/embodied-multimodality/liuxiaoran-240108120089/projects_triton/fourier_attn_triton/local/jsonl/8b_non_compress_info.json"
+    # MODEL_PATH = "meta-llama/Llama-3.2-3B/" 
+    MODEL_PATH = "meta-llama/Llama-3.1-8B/" 
+    # NON_CRITICAL_DIMS_PATH = " "# your path to FourierAttention/memory_effi_throughput/jsonl/3b_non_compress_info.json
+    NON_CRITICAL_DIMS_PATH = " " # your path to FourierAttention/memory_effi_throughput/jsonl/8b_non_compress_info.json
     REPEATS = 10 # Increase repeats for more stable averaging
     CONTEXT_LENGTH = 2560  # [160, 320, 640, 1280, 1920, 2560]  # 4k, 8k, 16k, 32k, 48k, 64k
     BATCH_SIZE = 1
