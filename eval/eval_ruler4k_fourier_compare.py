@@ -2,7 +2,7 @@ from opencompass.models import FourierModel
 from mmengine.config import read_base
 from opencompass.partitioners import NaivePartitioner
 from opencompass.runners import LocalRunner
-from opencompass.tasks import OpenICLInferTask
+from opencompass.tasks import OpenICLInferTask, OpenICLEvalTask
 
 with read_base():
     from opencompass.configs.datasets.ruler.ruler_4k_gen import ruler_datasets
@@ -15,7 +15,7 @@ datasets = ruler_datasets
 
 models = [
     dict(
-        abbr = 'llama3_2-3b-fourier-ruler4k-uniform',
+        abbr = 'llama3_2_3b-fourier-ruler4k-uniform',
         type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
@@ -27,7 +27,7 @@ models = [
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourier-ruler4k-fourier',
+        abbr = 'llama3_2_3b-fourier-ruler4k-fourier',
         type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
@@ -39,7 +39,7 @@ models = [
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourier-ruler-kvinverse',
+        abbr = 'llama3_2_3b-fourier-ruler-kvinverse',
         type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
@@ -51,7 +51,7 @@ models = [
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
     dict(
-        abbr = 'llama3_2-3b-fourier-ruler-layerinverse',
+        abbr = 'llama3_2_3b-fourier-ruler-layerinverse',
         type=FourierModel,
         path="meta-llama/Llama-3.2-3B",
         model_type='llama',
@@ -64,33 +64,21 @@ models = [
     ),
 ]
 
-work_dir ='outputs/llama3_2-3b-fourier-ruler4k-ablation'
+work_dir ='outputs/llama3_2_3b-fourier-ruler4k-ablation'
 
 infer = dict(
-    partitioner=dict(type=NaivePartitioner),  # dict(type=NumWorkerPartitioner, num_worker=4),
+    partitioner=dict(type=NaivePartitioner),  
     runner=dict(
         type=LocalRunner,
-        # max_num_workers=2,
-        task=dict(type=OpenICLInferTask)),
-    # runner=dict(
-    #     type=DLCRunner,
-    #     max_num_workers=256,  # 84,
-    #     task=dict(type=OpenICLInferTask),
-    #     aliyun_cfg=aliyun_cfg, 
-    #     preemptible=True, 
-    #     priority=6, 
-    #     retry=8),
+        task=dict(type=OpenICLInferTask), 
+    ),
 )
 
-# eval = dict(
-#     partitioner=dict(type=NaivePartitioner),
-
-#     # runner=dict(
-#     #     type=DLCRunner,
-#     #     max_num_workers=84,
-#     #     task=dict(type=OpenICLEvalTask),
-#     #     aliyun_cfg=aliyun_cfg,
-#     #     preemptible=True, 
-#     #     priority=9, 
-#     #     retry=2),
-# )
+eval = dict(
+    partitioner=dict(type=NaivePartitioner),
+    runner=dict(
+        type=LocalRunner,
+        max_num_workers=64, 
+        task=dict(type=OpenICLEvalTask, dump_details=True),
+    ),
+)
