@@ -171,6 +171,9 @@
   },
   "active": "8f1eabc89e741c88",
   "lastOpenFiles": [
+    "img/niah-llama3_2_3b.png",
+    "img/niah-llama3_1_8b.png",
+    "img/efficiency.png",
     "compressed_dims_search/compressed_dim_search.py",
     "img/longbench.png",
     "img/needlebench2.png",
@@ -185,7 +188,6 @@
     "needlebench/needlebench/needlebench_single.py",
     "needlebench/needlebench/needlebench.py",
     "needlebench/needlebench",
-    "needlebench/新建文件夹",
-    "needlebench"
+    "needlebench/新建文件夹"
   ]
 }
