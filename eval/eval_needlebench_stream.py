@@ -78,5 +78,5 @@ infer = dict(
 
 # source /fs-computility/llm/liuxiaoran/.bashrc
 # conda activate /cpfs01/user/liuxiaoran/miniconda3/envs/llm-cuda12.1
-# python run.py eval_xrliu/eval_xrliu_niah.py --dump-eval-details --debug -r  调试用
-# python run.py eval_xrliu/eval_xrliu_niah.py --dump-eval-details -r 20240820_190019 第一次用
+# python run.py eval_xrliu/eval_xrliu_niah.py --dump-eval-details --debug -r  (for debugging)
+# python run.py eval_xrliu/eval_xrliu_niah.py --dump-eval-details -r 20240820_190019 (first time use)

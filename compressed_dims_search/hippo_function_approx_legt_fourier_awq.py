@@ -195,26 +195,26 @@ def basis(method, N, vals, c=0.0, truncate_measure=True):
     """
     assert method == 'legt'
     
-    # 确保输入为float32类型
+    # Ensure input is float32 type
     vals = np.array(vals, dtype=np.float32)
     n_range = np.arange(N, dtype=np.float32)
     
-    # 计算勒让德多项式
+    # Calculate Legendre polynomial
     eval_matrix = ss.eval_legendre(n_range[:, None], 2*vals-1).T
-    eval_matrix = eval_matrix.astype(np.float32)  # 转换为float32
+    eval_matrix = eval_matrix.astype(np.float32)  # Convert to float32
     
-    # 计算缩放因子
+    # Calculate scaling factor
     scale_factor = (2*n_range + 1).astype(np.float32) ** 0.5  # (N,)
     signs = (-1.) ** n_range  # (N,)
     
-    # 正确的广播：先对scale_factor和signs进行广播
+    # Correct broadcasting: first broadcast scale_factor and signs
     scaling = (scale_factor * signs)[:, None]  # (N, 1)
     eval_matrix = eval_matrix * scaling.T  # (T, N) * (1, N)
     
     if truncate_measure:
         eval_matrix[measure(method)(vals) == 0.0] = 0.0
     
-    # 转换为float32 tensor并应用指数衰减
+    # Convert to float32 tensor and apply exponential decay
     p = torch.tensor(eval_matrix, dtype=torch.float32)
     p *= torch.tensor(np.exp(-c*vals), dtype=torch.float32)[:, None]
     
@@ -295,50 +295,50 @@ class MultiDimHiPPO(nn.Module):
     """Multi-dimensional Linear time invariant x' = Ax + Bu"""
     def __init__(self, N, input_dim, method='legt', dt=1.0, T=1.0, discretization='bilinear', scale=False, c=0.0):
         super().__init__()
-        self.method = method #使用勒让德测度
+        self.method = method #Use Legendre measure
         self.N = N
         self.input_dim = input_dim
         self.dt = dt
         self.T = T
         self.c = c
         
-        self.base_N = N // input_dim  # 每个特征维度的状态数
-        # self.token_num=0 #记录当前的k
+        self.base_N = N // input_dim  # Number of states per feature dimension
+        # self.token_num=0 #Record current k
 
         base_N = self.base_N
-        A, B = transition(method, base_N)  # A: (base_N, base_N), 定义该特征维度对应的状态的动态变化
-        #B: (base_N, 1)，定义输入信号对状态的影响
-        A = A + np.eye(base_N) * c #通过添加c*I增加稳定性
+        A, B = transition(method, base_N)  # A: (base_N, base_N), Define state dynamics for this feature dimension
+        #B: (base_N, 1), Define input signal effect on states
+        A = A + np.eye(base_N) * c #Add c*I to increase stability
 
-        # B保持原始大小，因为每个维度都用相同的B
+        # B maintains original size, because all dimensions use the same B
         B = B.squeeze(-1)  # Shape: (base_N,)
 
         self.A = A  # Shape: (base_N, base_N)
         self.B = B  # Shape: (base_N,)
         self.measure_fn = measure(method)
         
-        # 修改离散化部分
-        C = np.ones((1, base_N))  # 改用base_N
+        # Modify discretization part
+        C = np.ones((1, base_N))  # Use base_N instead
         D = np.zeros((1,))
         dA, dB, _, _, _ = signal.cont2discrete((A, B.reshape(base_N, -1), C, D), dt=dt, method=discretization)
-        dB = dB.reshape(base_N)  # 只保持base_N大小，因为所有维度共享相同的B
+        dB = dB.reshape(base_N)  # Keep only base_N size, because all dimensions share same B
 
         # Convert to float32 and register buffers
-        self.register_buffer('dA', torch.tensor(dA, dtype=torch.float32))  # (base_N, base_N)保存离散化后的矩阵让它不可训练
-        self.register_buffer('dB', torch.tensor(dB, dtype=torch.float32))  # (base_N,)保存离散化后的矩阵让它不可训练
+        self.register_buffer('dA', torch.tensor(dA, dtype=torch.float32))  # (base_N, base_N) Save discretized matrix as non-trainable
+        self.register_buffer('dB', torch.tensor(dB, dtype=torch.float32))  # (base_N,) Save discretized matrix as non-trainable
 
         self.vals = np.arange(0.0, T, dt)
-        # eval_matrix也要改用base_N
+        # eval_matrix also needs to use base_N
         self.eval_matrix = basis(self.method, base_N, self.vals, c=self.c)  # (T/dt, base_N)
         self.measure = measure(self.method)(self.vals)
 
     def forward(self, base_input, token_num, slice_input=None, fast=False):
         # base_input ( batchsize, base_N, input_dim ) 
         batch_size = base_input.size(0)
-        print(f"现在的self.token_num：{token_num}")
+        print(f"Current self.token_num: {token_num}")
         if slice_input is not None:
             # token_num+=1
-            base_N = self.N // self.input_dim // 2 # 每个维度的状态数
+            base_N = self.N // self.input_dim // 2 # Number of states per dimension
             # print(base_input.shape)
             vals = np.ones(slice_input.shape[1], dtype=np.float32)*self.dt*token_num
             n_range = np.arange(base_N, dtype=np.float32)
@@ -354,7 +354,7 @@ class MultiDimHiPPO(nn.Module):
             return base_input+C_add
         
         else:
-            base_N = self.N // self.input_dim // 2 # 每个维度的状态数
+            base_N = self.N // self.input_dim // 2 # Number of states per dimension
             # print(base_input.shape)
             vals = np.arange(base_input.shape[1], dtype=np.float32)*self.dt
             n_range = np.arange(base_N, dtype=np.float32)
@@ -376,7 +376,7 @@ class MultiDimHiPPO(nn.Module):
         c: (..., N) HiPPO coefficients (same as x(t) in S4 notation)
         output: (..., L, input_dim)
         """
-        base_N = self.N // self.input_dim // 2  # 每个维度的状态数
+        base_N = self.N // self.input_dim // 2  # Number of states per dimension
         
         vals = np.arange(clip_len, dtype=np.float32)*self.dt
         n_range = np.arange(base_N, dtype=np.float32)
@@ -388,7 +388,7 @@ class MultiDimHiPPO(nn.Module):
 
         # u_inv = (u_inv - u_inv.mean(axis=1, keepdims=True)) / u_inv.max(axis=1, keepdims=True)
         # max_vals = u_inv.max(axis=1, keepdims=True).values
-        # u_inv = (u_inv - u_inv.mean(axis=1, keepdims=True)) / max_vals  在外面做
+        # u_inv = (u_inv - u_inv.mean(axis=1, keepdims=True)) / max_vals  (do it outside)
         print(u_inv.shape)
         return u_inv
 ### Synthetic data generation
@@ -436,7 +436,7 @@ def multi_dim_whitesignal(period, dt, freq, dims=1, rms=0.5, batch_shape=()):
     for _ in range(dims):
         signal = whitesignal(period, dt, freq, rms, batch_shape)
         signals.append(signal)
-    return np.stack(signals, axis=-1).astype(np.float32)  # 确保返回 float32
+    return np.stack(signals, axis=-1).astype(np.float32)  # Ensure return float32
 
 
 visualize = False
@@ -590,8 +590,8 @@ def animate_hippo(
 
 def animate_multi_dim_hippo(
     method='legt',
-    T=1.0, dt=1e-4, N=256, # N；总的状态维度数
-    input_dim=2,  # 输入的维度，每个输入维度的状态为 N//input_dim 维
+    T=1.0, dt=1e-4, N=256, # N: Total state dimension count
+    input_dim=2,  # Input dimension, each input dimension state is N//input_dim dimensions
     freq=20.0,
     interval=100,
     size=1.0,
@@ -608,7 +608,7 @@ def animate_multi_dim_hippo(
     vals = np.arange(0, int(T/dt)+1)
     L = int(T/dt)+1
     
-    # 修改数据生成和转换部分
+    # Modify data generation and transformation part
     signal = multi_dim_whitesignal(T, dt, freq=freq, dims=input_dim)
     signal = signal.astype(np.float32)
     u = torch.tensor(signal, dtype=torch.float32)
@@ -765,7 +765,7 @@ def visualize_example():
 
 # print('yes')
 
-# 创建动画
+# Create animation
 # ani = animate_multi_dim_hippo(
 #     method='legt',
 #     T=1, 

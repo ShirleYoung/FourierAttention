@@ -247,7 +247,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 class LlamaMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # 在你的自定义模型 __init__ 的一开始调用
+        # Call at the beginning of your custom model's __init__
         _ensure_llama_compat(config)
         self.config = config
         self.hidden_size = config.hidden_size
@@ -302,7 +302,7 @@ class LlamaAttention(nn.Module):
 
     def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
         super().__init__()
-        # 在你的自定义模型 __init__ 的一开始调用
+        # Call at the beginning of your custom model's __init__
         _ensure_llama_compat(config)
         self.config = config
         self.layer_idx = layer_idx
@@ -615,14 +615,14 @@ class LlamaSdpaAttention(LlamaAttention):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
 
-        if past_key_value is not None: #必经之路
+        if past_key_value is not None: #mandatory path
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position} 
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
         if key_states["k_init"]==None and key_states["k_compressed"]==None and key_states["k_uncompressed"]==None:
-            #打印
-            # print(f"在if里query_states的大小是{query_states.size()}")
+            #print statement
+            # print(f"Query states size in if: {query_states.size()}")
             
             key_states=key_states["k_local"]
             value_states=value_states["v_local"]
@@ -635,8 +635,8 @@ class LlamaSdpaAttention(LlamaAttention):
 
         else:
             # torch_fourier_attn, triton_fourier_attn
-            #打印
-            # print(f"在else里query_states的大小是{query_states.size()}")
+            #print statement
+            # print(f"Query states size in else: {query_states.size()}")
             
             attn_output = triton_fourier_attn(q=query_states.transpose(1, 2).view(bsz, q_len, self.num_heads * self.head_dim).contiguous(),
                                               k_il=torch.cat([key_states["k_init"], key_states["k_local"]], dim=1).contiguous(), 
@@ -1159,7 +1159,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
 
     def __init__(self, config):
         super().__init__(config)
-        # 在你的自定义模型 __init__ 的一开始调用
+        # Call at the beginning of your custom model's __init__
         _ensure_llama_compat(config)
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size

@@ -84,7 +84,7 @@
 #         input_ids = input_tokens.input_ids.to(self.model.device)
 #         attention_mask = input_tokens.attention_mask.to(self.model.device)
 
-#         # streaming prefill，不进行裁剪
+#         # streaming prefill, no truncation
 #         outputs = self.model(input_ids=input_ids, use_cache=True)
 #         past_key_values = outputs.past_key_values
 #         next_tokens = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
@@ -125,7 +125,7 @@ class PyramidKVModel(BaseModel):
                  tokenizer_kwargs: dict = dict(),
                  max_seq_len: int = 2048,
                  generation_kwargs: dict = dict(),
-                 method: str = "pyramidkv",  # <- 支持 snapkv
+                 method: str = "pyramidkv",  # <- Support for snapkv
                  attn_implementation: str = "flash_attention_2",
                  max_capacity_prompt: int = 128):
         super().__init__(path=path, max_seq_len=max_seq_len)

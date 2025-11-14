@@ -16,7 +16,7 @@ class StreamingModel(BaseModel):
                  enable_streaming: bool = True,
                  start_size: int = 4,
                  recent_size: int = 1024):
-        # 初始化父类
+        # Initialize parent class
         BaseModel.__init__(self, path=path, max_seq_len=max_seq_len)
         self.logger = get_logger()
 
@@ -39,12 +39,12 @@ class StreamingModel(BaseModel):
             self.kv_cache = None
 
     def _load_tokenizer(self, path: str, tokenizer_kwargs: dict):
-        """加载指定路径的tokenizer"""
+        """Load tokenizer"""
         self.tokenizer = AutoTokenizer.from_pretrained(path, **tokenizer_kwargs)
         self.pad_token_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id
 
     def _load_model(self, path: str, model_kwargs: dict):
-        """加载模型"""
+        """Load models"""
         self.model, self.tokenizer = load(path)
 
     def _greedy_generate(self, input_ids, past_key_values, max_gen_len, generation_kwargs):
@@ -53,23 +53,22 @@ class StreamingModel(BaseModel):
 
     @torch.no_grad()
     def generate(self, inputs: list, max_out_len: int) -> list:
-        """根据输入生成文本"""
         self.model.eval()
         outputs_text = []
 
         for text in inputs:
-            # 添加 USER 和 ASSISTANT 前缀
+            # Add USER and ASSISTANT prefix
             prompt = f"USER: {text}\n\nASSISTANT: "
             input_ids = self.tokenizer(prompt, return_tensors="pt", truncation=True).input_ids.to(self.model.device)
 
-            # 如果启用了 streaming 模式，则调用流式推理
+            # If streaming mode is enabled, call streaming inference
             if self.enable_streaming:
                 past_key_values = None
-                # 直接使用带有角色前缀的 prompt
+                # Use prompt with role prefix directly
                 generated_text =streaming_inference(self.model, self.tokenizer, [text], self.kv_cache, max_gen_len=max_out_len, generation_kwargs=self.generation_kwargs)
                 # generated_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
             else:
-                # 否则使用 greedy 生成
+                # Otherwise use greedy generation
                 generated_text = self._greedy_generate(input_ids, None, max_out_len, self.generation_kwargs)
 
             outputs_text.append(generated_text)
@@ -78,10 +77,10 @@ class StreamingModel(BaseModel):
         return outputs_text
 
 
-# 原本的
+# Original version
 # @torch.no_grad()
 # def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, generation_kwargs):
-#     # 获取初始输出
+#     # Get initial output
 #     outputs = model(
 #         input_ids=input_ids,
 #         past_key_values=past_key_values,
@@ -89,17 +88,17 @@ class StreamingModel(BaseModel):
 #     )
     
 #     past_key_values = outputs.past_key_values
-#     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)  # 获取最后一个 token 的预测
-#     generated_ids = [pred_token_idx.item()]  # 存储生成的 token
+#     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)  # Get prediction for last token
+#     generated_ids = [pred_token_idx.item()]  # Store generated token
 #     pos = 0
 
-#     # 输出调试信息
+#     # Output debug information
 #     # print(f"Initial input: {tokenizer.decode(input_ids[0], skip_special_tokens=True)}")
 #     # print(f"First token generated: {tokenizer.decode([pred_token_idx.item()])}")
 
-#     # 生成过程，最大生成长度
+#     # Generation process, maximum generation length
 #     for _ in range(max_gen_len - 1):
-#         # 每次从生成的 token 中继续推理
+#         # Continue reasoning from generated tokens each time
 #         outputs = model(
 #             input_ids=pred_token_idx,
 #             past_key_values=past_key_values,
@@ -109,39 +108,39 @@ class StreamingModel(BaseModel):
 #         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
 #         generated_ids.append(pred_token_idx.item())
 
-#         # # 调试生成的 token
+#         # # Debug generated tokens
 #         # print(f"Generated token: {tokenizer.decode([pred_token_idx.item()])}")
 
-#         # 检查生成的文本
+#         # Check generated text
 #         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
 #         if len(generated_text.split()) > pos:
 #             pos = len(generated_text.split())
 
-#         # 如果遇到 eos_token，则停止生成
+#         # If EOS token is encountered, stop generation
 #         if pred_token_idx == tokenizer.eos_token_id:
 #             break
 
 #     return past_key_values, generated_text
 
-# prefill阶段也压缩的
+# Also compress in prefill stage
 @torch.no_grad()
 def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, generation_kwargs):
-    # === PREFILL阶段: 对input_ids进行截断以节省显存 ===
+    # === PREFILL stage: Truncate input_ids to save GPU memory ===
     if past_key_values is None and generation_kwargs is not None:
         num_init_tokens = generation_kwargs.get('numinittokens', 4)
         max_local_len = generation_kwargs.get('maxlocallen', 1024)
 
         total_len = input_ids.shape[1]
 
-        # 保留前 num_init_tokens 和后 max_local_len 个 tokens
+        # Keep first num_init_tokens and last max_local_len tokens
         keep_front = input_ids[:, :num_init_tokens]
         keep_tail = input_ids[:, -max_local_len:] if total_len > max_local_len else input_ids
 
-        # 如果截断后比原始短，才执行拼接
+        # Concatenate only if truncated length is less than original
         if keep_front.shape[1] + keep_tail.shape[1] < total_len:
             input_ids = torch.cat([keep_front, keep_tail], dim=1)
 
-    # === PREFILL 阶段: 第一次生成 ===
+    # === PREFILL stage: First generation ===
     outputs = model(
         input_ids=input_ids,
         past_key_values=past_key_values,
@@ -153,7 +152,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, g
     generated_ids = [pred_token_idx.item()]
     pos = 0
 
-    # === DECODE 阶段: 后续逐 token 生成 ===
+    # === DECODE stage: Generate subsequent tokens one by one ===
     for _ in range(max_gen_len - 1):
         outputs = model(
             input_ids=pred_token_idx,
@@ -164,11 +163,11 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, g
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
         generated_ids.append(pred_token_idx.item())
 
-        # 如果生成了 <eos>，提前终止
+        # If EOS token generated, terminate early
         if pred_token_idx.item() == tokenizer.eos_token_id:
             break
 
-    # 解码最终输出
+    # Decode final output
     generated_text = tokenizer.decode(
         generated_ids,
         skip_special_tokens=True,
@@ -183,18 +182,18 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, g
 def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=1000, generation_kwargs=None):
     past_key_values = None
     for idx, prompt in enumerate(prompts):
-        # 添加 USER 和 ASSISTANT 前缀
+        # Add USER and ASSISTANT prefix
         # print("\nUSER: " + prompt + "\nASSISTANT:", end="")
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids
         input_ids = input_ids.to(model.device)
         seq_len = input_ids.shape[1]
 
-        # 确保缓存正确传递
+        # Ensure cache is passed correctly
         if kv_cache is not None:
             space_needed = seq_len + max_gen_len
             past_key_values = kv_cache.evict_for_space(past_key_values, space_needed)
 
-        # 这里调用 greedy_generate
+        # Call greedy_generate here
         past_key_values, generated_text  = greedy_generate(
             model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len, generation_kwargs=generation_kwargs
         )

@@ -263,11 +263,11 @@ def gen_atc_summarizer(needle_num_list):
     ]
     needlebench_atc_summary_groups = []
 
-    # 根据分类生成summary groups
+    # Generate summary groups by category
     for category in categories:
-        # 对于CircularEval相关的评分，使用perf_4指标，否则使用acc_1指标
+        # For CircularEval-related scores, use perf_4 metric, otherwise use acc_1 metric
         metric = 'perf_4' if 'CE' in category else 'acc_1'
-        # 生成subsets时，不需要在数据集名称中包含CircularEval信息
+        # When generating subsets, no need to include CircularEval information in the dataset name
         cleaned_category = category.replace('-CE', '').replace('-Direct', '')
         needlebench_atc_summary_groups.append({
             'name': category,

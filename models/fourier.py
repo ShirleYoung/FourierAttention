@@ -30,32 +30,32 @@ class FourierModel(BaseModel):
         self.midstates = midstates
         self.generation_kwargs = generation_kwargs
         
-        # 检测模型类型
+        # Detect model type
         self.model_type = self._detect_model_type(path)
         self.logger.info(f"Detected model type: {self.model_type}")
         
         self._load_model_and_tokenizer(path, model_kwargs, tokenizer_kwargs)
 
     def _detect_model_type(self, path: str) -> str:
-        """检测模型类型（Llama / Qwen2 / Qwen3）"""
+        """Detect model type (Llama / Qwen2 / Qwen3)"""
         config = AutoConfig.from_pretrained(path, trust_remote_code=True)
 
-        # 1) 直接依据 model_type
+        # 1) Directly based on model_type
         mt = getattr(config, "model_type", None)
         if isinstance(mt, str):
             mtl = mt.lower()
             if "llama" in mtl:
                 return "llama"
-            # 新版 transformers/Qwen 族常见写法
+            # Common way for new transformers/Qwen families
             if "qwen3" in mtl:
                 return "qwen3"
             if "qwen2" in mtl:
                 return "qwen2"
-            # 旧版可能用到 "qwen"（不含代际），默认按 qwen2 处理
+            # Old versions may use "qwen" (without generation), default to qwen2
             if mtl == "qwen":
                 return "qwen2"
 
-        # 2) 依据 architectures 字段（更稳）
+        # 2) Based on architectures field (more stable)
         archs = getattr(config, "architectures", None) or []
         archs_l = [str(a).lower() for a in archs]
         if any("qwen3forcausallm" in a or "qwen3" in a for a in archs_l):
@@ -63,17 +63,17 @@ class FourierModel(BaseModel):
         if any("qwen2forcausallm" in a or "qwen2" in a for a in archs_l):
             return "qwen2"
         if any(a == "qwenforcausallm" or "qwen" in a for a in archs_l):
-            # 旧 Qwen（1.x）默认按 qwen2 的分支处理
+            # Old Qwen (1.x) default to qwen2 branch
             return "qwen2"
 
-        # 3) 依据路径关键词（兜底）
+        # 3) Based on path keywords (fallback)
         pl = path.lower()
         if "llama" in pl:
             return "llama"
         if "qwen3" in pl:
             return "qwen3"
         if "qwen2" in pl or "qwen-2" in pl or "qwen2.5" in pl:
-            # Qwen2.5 在很多仓库里仍使用 model_type=qwen2
+            # Qwen2.5 still uses model_type=qwen2 in many repositories
             return "qwen2"
         if "qwen" in pl:
             return "qwen2"
@@ -97,7 +97,7 @@ class FourierModel(BaseModel):
         # Load model configuration
         self.config = AutoConfig.from_pretrained(path, trust_remote_code=True)
 
-        # 根据模型类型动态导入对应的模型和缓存类
+        # Load different model and cache classes based on model type
         if self.model_type == 'llama':
             from modeling_llama_fourier import LlamaForCausalLM
             from cache_utils_fourier import DynamicCache
@@ -106,7 +106,7 @@ class FourierModel(BaseModel):
             self.logger.info("Loading Llama model with Fourier attention")
 
         elif self.model_type == 'qwen2':
-            # 你需要提供以下文件：lxr_modeling_qwen2_fourier.py / lxr_cache_utils_fourier_qwen2.py
+            # You need to provide: modeling_qwen2_fourier.py / cache_utils_fourier_qwen2.py
             from modeling_qwen2_fourier import Qwen2ForCausalLM
             from cache_utils_fourier_qwen import DynamicCache
             self.DynamicCacheClass = DynamicCache
@@ -114,7 +114,7 @@ class FourierModel(BaseModel):
             self.logger.info("Loading Qwen2 model with Fourier attention")
 
         elif self.model_type == 'qwen3':
-            # 你需要提供以下文件：lxr_modeling_qwen3_fourier.py / lxr_cache_utils_fourier_qwen3.py
+            # You need to provide: modeling_qwen3_fourier.py / cache_utils_fourier_qwen3.py
             from modeling_qwen3_fourier import Qwen3ForCausalLM
             from cache_utils_fourier_qwen import DynamicCache
             self.DynamicCacheClass = DynamicCache
@@ -139,7 +139,7 @@ class FourierModel(BaseModel):
 
 
     def _get_extra_config(self):
-        """获取额外配置信息"""
+        """Get additional configuration information"""
         extra_config = ExtraConfig(
             numinittokens=4,
             maxlocallen=1020,
@@ -154,7 +154,7 @@ class FourierModel(BaseModel):
 
     @torch.no_grad()
     def generate(self, inputs: list, max_out_len: int) -> list:
-        """生成文本"""
+        """Generate text"""
         self.model.eval()
         outputs_text = []
 
@@ -171,7 +171,7 @@ class FourierModel(BaseModel):
         generated_sequence = input_ids
         eos_token_id = self.tokenizer.eos_token_id or self.tokenizer.pad_token_id
 
-        # 生成文本
+        # Generate text
         for step in range(max_out_len):
             outputs = self.model(
                 input_ids=input_ids, 
@@ -179,20 +179,20 @@ class FourierModel(BaseModel):
                 use_cache=True
             )
             
-            # 获取下一个token
+            # Get next token
             input_ids = torch.argmax(outputs.logits[:, -1, :], dim=-1, keepdim=True)
             generated_sequence = torch.cat([generated_sequence, input_ids], dim=-1)
             self.past_key_values = outputs.past_key_values
 
-            # 检查是否生成了结束符
+            # Check if EOS token is generated
             if input_ids.item() == eos_token_id:
                 self.logger.info(f"EOS token generated at step {step}")
                 break
 
-        # 重置缓存
+        # Reset cache
         self.past_key_values = self.DynamicCacheClass(self._get_extra_config())
         
-        # 解码生成的文本
+        # Decode generated text
         for i in range(len(inputs)):
             text = self.tokenizer.decode(
                 generated_sequence[i, init_len:], 

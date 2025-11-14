@@ -139,21 +139,21 @@ def compute_cosine_similarity(qkv_result_tocompress, qkv_result_mid_decompressed
     mean_tocompress = torch.mean(qkv_result_tocompress[0, :, :], dim=0, keepdim=True)
     scale = torch.max(torch.abs(qkv_result_mid_decompressed[0, :, :] - mean_decompressed), dim=0).values / torch.max(torch.abs(qkv_result_tocompress[0, :, :] - mean_tocompress), dim=0).values
     
-    data = qkv_result_mid_decompressed[0, :, :]  # 形状为 [seq_len, input_dim]
-    means = data.mean(dim=0)  # 计算每个 input_dim 的平均值, 结果形状为 [input_dim]
-    data_centered = data - means  # 中心化
-    data_scaled = data_centered / scale  # 按比例缩放
-    data_final = data_scaled + torch.mean(qkv_result_tocompress[0, :, :], dim=0)  # 加回均值
+    data = qkv_result_mid_decompressed[0, :, :]  # Shape: [seq_len, input_dim]
+    means = data.mean(dim=0)  # Calculate mean value of each input_dim, result shape is [input_dim]
+    data_centered = data - means  # Center the data
+    data_scaled = data_centered / scale  # Scale proportionally
+    data_final = data_scaled + torch.mean(qkv_result_tocompress[0, :, :], dim=0)  # Add back mean
     qkv_result_mid_decompressed[0, :, :] = data_final
 
     all_sample_similarities = torch.zeros(bs, num_dims)
 
-    for j in range(bs):  # 对每个样本进行操作
-        for i in range(num_dims):  # 对每个特征维度计算相似度
+    for j in range(bs):  # Process each sample
+        for i in range(num_dims):  # Calculate similarity for each feature dimension
             compressed_vectors = qkv_result_tocompress[j, :, i]  # shape: [seq_len]
             decompressed_vectors = qkv_result_mid_decompressed[j, :, i]  # shape: [seq_len]
 
-            # similarity = F.cosine_similarity(compressed_vectors.unsqueeze(0), decompressed_vectors.unsqueeze(0), dim=-1)  # 形状 [1]
+            # similarity = F.cosine_similarity(compressed_vectors.unsqueeze(0), decompressed_vectors.unsqueeze(0), dim=-1)  # Shape [1]
             similarity = F.mse_loss(compressed_vectors.unsqueeze(0), decompressed_vectors.unsqueeze(0))
 
             all_sample_similarities[j, i] = similarity.item()
@@ -166,7 +166,7 @@ def run_awq(
     enc,
     w_bit,
     q_config,
-    input_texts,  # 输入文本的列表
+    input_texts,  # List of input texts
     n_samples=512,
     seqlen=512,
     auto_scale=True,
@@ -180,7 +180,7 @@ def run_awq(
 
     layers = get_blocks(model)
 
-    # 将文本列表编码成模型输入，但不将它们合并成一个批次
+    # Encode text list into model input, but do not merge them into a single batch
     samples = [torch.tensor(enc.encode(text)).to(device) for text in input_texts]
     for sample in samples:
         sample = sample.unsqueeze(0)
@@ -206,9 +206,9 @@ def run_awq(
         layers[0] = Catcher(layers[0])
         try:
             if model.__class__.__name__ == "LlavaLlamaModel":
-                model.llm(sample.to(next(model.parameters()).device))  # 逐个样本传入
+                model.llm(sample.to(next(model.parameters()).device))  # Pass sample one by one
             else:
-                model(sample.to(next(model.parameters()).device))  # 逐个样本传入
+                model(sample.to(next(model.parameters()).device))  # Pass sample one by one
         except Exception as e:
             pass
 
@@ -223,9 +223,9 @@ def run_awq(
         gc.collect()
         torch.cuda.empty_cache()
 
-        # print(f"inputs的size {inps[0].size()}")
+        # print(f"inputs size: {inps[0].size()}")
 
-        # **逐样本处理**，而非批量处理
+        # **Process sample by sample, not batch processing**
         # for idx, sample in enumerate(inps):
             # print(f"Processing sample {idx + 1}/{len(inps)}...")
         sample = torch.tensor(inps[0])
@@ -238,13 +238,13 @@ def run_awq(
 
             def cache_individual_qkv_hooks(m, x, y, name, qkv_dict, similarity_dict,numinittokens, maxlocallen, maxmidstates):
                 print(f"name is {name}")
-                x_input = x[0]  # 获取输入 X
+                x_input = x[0]  # Get input X
                 print(f"x's shape is {x_input.size()}")
                 seq_len_ori = x_input.size(1)
 
-                w_weights = m.weight  # 获取当前模块的权重 W_q/W_k/W_v
+                w_weights = m.weight  # Get current module weights W_q/W_k/W_v
                 print(f"Weights' shape is {w_weights.size()}")
-                qkv_result = torch.matmul(x_input, w_weights.T)  # 独立计算 Q/K/V
+                qkv_result = torch.matmul(x_input, w_weights.T)  # Independently compute Q/K/V
                 # qkv_result = qkv_result.detach().cpu()
                 qkv_dict[name] = qkv_result
 
@@ -257,7 +257,7 @@ def run_awq(
                 ).to('cuda')
 
                 qkv_result_init = qkv_result[:, :numinittokens, :]
-                qkv_result_local = qkv_result[:, -maxlocallen:, :]  # 局部窗口对应key矩阵
+                qkv_result_local = qkv_result[:, -maxlocallen:, :]  # Local window key matrix
                 qkv_result_tocompress = qkv_result[:, numinittokens:-maxlocallen, :]
 
                 qkv_result_mid_compressed = hippo(qkv_result_tocompress.to("cuda"),token_num = 0)
@@ -275,7 +275,7 @@ def run_awq(
                 print("******")
                 print(name)
                 print("******")
-                # 分别为 k_proj, v_proj 注册独立钩子
+                # Register independent hooks for k_proj and v_proj respectively
                 if "k_proj" in name or "v_proj" in name:
                     print("we are in if")
                     handles.append(
@@ -299,7 +299,7 @@ def run_awq(
             for name, tensor in similarity_results.items():
                 print(f"{name}: {len(tensor)}{len(tensor[0])}")
 
-                # 将结果存储到字典
+                # Store results to dictionary
                 layer_name = f"Layer_{i}"
                 print(f"当前在第{i}层")
                 if layer_name not in all_sample_similarities:
@@ -318,15 +318,15 @@ def run_awq(
             gc.collect()
             torch.cuda.empty_cache()
 
-    # 定义一个字典保存80%小的平均值对应的特征维度
+    # Define a dictionary to save feature dimensions corresponding to 80% smallest mean values
     non_critical_dims_dict = {}
 
-    # 遍历 all_sample_similarities 中每个 layername 和 name 对应的 tensor
+    # Traverse each layername and name corresponding tensor in all_sample_similarities
     for layername, layer_data in all_sample_similarities.items():
         
-        # 设置非关键维度的比例（每层设置成不一样的）
+        # Set proportion of non-critical dimensions (different for each layer)
         percent = 0
-        layer_number = int(layername.split('_')[1])  # 提取层数部分
+        layer_number = int(layername.split('_')[1])  # Extract layer number
 
         
         print(f"layername is :{layername}")
@@ -334,11 +334,11 @@ def run_awq(
         non_critical_dims_dict[layername] = {}
         # print(layer_data)
         for name, tensor in layer_data.items():
-            # 打印 tensor 长度和第一个元素
+            # Print tensor length and first element
             # print(len(tensor))
             # print(tensor[0])
             # print("name")
-            # 设置压缩比例
+            # Set compression ratio
             if 20 <= layer_number <= 27:
                 if name == "self_attn.k_proj":
                     percent = 0.5
@@ -353,46 +353,46 @@ def run_awq(
                 percent = 0.8
             
             
-            # 初始化一个与 tensor[0][0] 相同形状的张量，用来存储平均值
+            # Initialize a tensor with the same shape as tensor[0][0] to store mean values
             mean_similarities = torch.zeros(tensor[0][0].shape)
 
-            # 遍历 tensor 中所有的元素，计算每个特征维度的平均值
+            # Traverse all elements in tensor and calculate mean value of each feature dimension
             for t in tensor:
-                mean_similarities += t[0].squeeze(0)  # 对每个 tensor 的第一维（[0]）进行累加
+                mean_similarities += t[0].squeeze(0)  # Accumulate first dimension ([0]) of each tensor
 
-            # 计算平均值，除以 tensor 的长度
+            # Calculate mean value by dividing by the length of tensor
             mean_similarities /= len(tensor)
 
-            # 对平均值进行排序，选出80%最小的特征维度
-            mean_abs_values = mean_similarities.abs()  # 求平均值的绝对值
-            sorted_indices = torch.argsort(mean_abs_values)  # 排序索引
+            # Sort mean values and select 80% smallest feature dimensions
+            mean_abs_values = mean_similarities.abs()  # Get absolute value of mean
+            sorted_indices = torch.argsort(mean_abs_values)  # Sort indices
 
-            ### 存文件 
-            # 转换为可以被JSON序列化的格式
-            mean_similarities_list = mean_similarities.tolist()  # 将张量转换为列表
-            sorted_indices_list = sorted_indices.tolist()  # 将张量转换为列表
+            ### Save to file
+            # Convert to JSON serializable format
+            mean_similarities_list = mean_similarities.tolist()  # Convert tensor to list
+            sorted_indices_list = sorted_indices.tolist()  # Convert tensor to list
 
-            # 创建一个字典来存储这些数据
+            # Create a dictionary to store this data
             data = {
                 "mean_similarities": mean_similarities_list,
                 "sorted_indices": sorted_indices_list
             }
 
-            # 将数据保存到JSON文件
+            # Save data to JSON file
             with open('/FourierAttention/compressed_dims_file/data_ruler4k.json ', 'a') as json_file:  # your path to save the mean_similaritites and sorted_indices so that you can use compressed_dims_search_readfile.py to easily change the scale
                 json.dump({layername: {name: data}}, json_file)
                 json_file.write("\n")  
 
 
-            # 选出前80%的特征维度
+            # Select 80% feature dimensions
             num_non_critical = int(percent * mean_similarities.shape[0])  
             non_critical_indices = sorted_indices[:num_non_critical]  
 
-            # 保存到字典
-            non_critical_dims_dict[layername][name] = non_critical_indices.tolist()  # 转换为 list 保存
+            # Save to dictionary
+            non_critical_dims_dict[layername][name] = non_critical_indices.tolist()  # Convert to list and save
 
 
-    # 保存非关键维度结果，可改
+    # Save non-critical dimensions result (can be modified)
     with open("/FourierAttention/compressed_dims_file/llama3.2-3b/compressed_dims_4k_fourier.json", "w", encoding="utf-8") as f:
         json.dump(non_critical_dims_dict, f, ensure_ascii=False, indent=4)
 
@@ -402,7 +402,7 @@ def run_awq(
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def main():
-    # 模型路径，可改
+    # Model path, can be changed
     model_name = "meta-llama/Llama-3.2-3B"
     print("loading models and tokenizer...")
     model = LlamaForCausalLM.from_pretrained(model_name, device_map="cuda:0")
@@ -414,33 +414,33 @@ def main():
         # your path to your context
     ]
 
-    # 用于保存所有提取出的origin_prompt
+    # Used to save all extracted origin_prompts
     origin_prompts = []
 
-    # 遍历每个文件，只提取2条origin_prompt
+    # Traverse each file and extract only 2 origin_prompts
     for file_path in file_paths:
         with open(file_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
         prompts = [entry['origin_prompt'] for entry in data.values()][:2]
         origin_prompts.extend(prompts)
 
-    # 打印总共提取的prompt数量
-    print(f"Total origin prompts count: {len(origin_prompts)}")  # 应该是 8 * 2 = 16
+    # Print total number of extracted prompts
+    print(f"Total origin prompts count: {len(origin_prompts)}")  # Should be 8 * 2 = 16
 
-    # 设置运行参数
-    w_bit = 8  # 权重量化比特数，例如 8 或 4
-    q_config = {}  # 量化的额外配置
+    # Set running parameters
+    w_bit = 8  # Weight quantization bits, e.g. 8 or 4
+    q_config = {}  # Additional quantization configuration
 
-    # 提取输入特征
-    print("开始提取输入特征...")
+    # Extract input features
+    print("Starting to extract input features...")
     input_feat = run_awq(
         model=model,
         enc=tokenizer,
         w_bit=w_bit,
         q_config=q_config,
-        input_texts=origin_prompts, # 输入文本的列表
-        n_samples=10,  # 仅测试用，加载 10 个样本以加速运行
-        seqlen=512,  # 输入序列长度
+        input_texts=origin_prompts,
+        n_samples=10,  
+        seqlen=512,  
         auto_scale=False,
         mse_range=False,
     )

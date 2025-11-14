@@ -98,8 +98,8 @@ def mat_fourier_triton(a, N, T, K_start=0):
             a.stride(0), a.stride(1), a.stride(2),  #
             c.stride(0), c.stride(1), c.stride(2),  #
             BLOCK_SIZE_M=128, BLOCK_SIZE_N=128, BLOCK_SIZE_K=16, GROUP_SIZE_M=8, 
-        ) #新加的
-    return c #压缩，没有bs
+        ) #newly added
+    return c #compressed, no batch size
 
 
 @triton.jit
@@ -775,8 +775,8 @@ def triton_fourier_attn(q, k_il, v_il, k_mc, v_mc, k_mn, v_mn,
 
     o = torch.sum(o_up, dim=-2) / torch.sum(o_dn, dim=-1, keepdim=True)
 
-    # return o[..., :1, :].half()    # 原本返回了half 16
-    return o[..., :1, :]   # 修改后返回32 但是依然会有nan 32
+    # return o[..., :1, :].half()    # Originally returned half 16
+    return o[..., :1, :]   # Modified to return 32 but still has nan 32
 
 
 def mat_fourier_inv_torch(c, K, T):
@@ -841,17 +841,17 @@ class MultiDimHiPPO2(nn.Module):
     """Multi-dimensional Linear time invariant x' = Ax + Bu"""
     def __init__(self, N, input_dim, method='legt', dt=1.0, T=1.0, discretization='bilinear', scale=False, c=0.0):
         super().__init__()
-        self.method = method #使用勒让德测度
+        self.method = method #Use Legendre measure
         self.N = N
         self.input_dim = input_dim
         self.dt = dt
         self.T = T
         self.c = c
         
-        self.base_N = N // input_dim  # 每个特征维度的状态数
+        self.base_N = N // input_dim  # Number of states per feature dimension
 
     def forward(self, base_input, token_num, slice_input=None, fast=False):
-        base_N = self.N // self.input_dim // 2 # 每个维度的状态数
+        base_N = self.N // self.input_dim // 2 # Number of states per dimension
         if slice_input is not None:            
             return base_input + mat_fourier_triton(slice_input, base_N, int(1/self.dt), K_start=token_num)
         else:

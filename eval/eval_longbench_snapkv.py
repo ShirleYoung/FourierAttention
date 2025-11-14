@@ -21,8 +21,8 @@ models = [
         max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
-        method="snapkv",  # 设定为 pyramidkv 方法
-        attn_implementation="flash_attention_2",  # 您可以根据需要选择其他的实现方式
+        method="snapkv",  # Set to pyramidkv method
+        attn_implementation="flash_attention_2",  # You can choose other implementations as needed
         max_capacity_prompt=2052,
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
@@ -34,8 +34,8 @@ models = [
         max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
-        method="snapkv",  # 设定为 pyramidkv 方法
-        attn_implementation="flash_attention_2",  # 您可以根据需要选择其他的实现方式
+        method="snapkv",  # Set to pyramidkv method
+        attn_implementation="flash_attention_2",  # You can choose other implementations as needed
         max_capacity_prompt=1540,
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
@@ -47,8 +47,8 @@ models = [
         max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
-        method="snapkv",  # 设定为 pyramidkv 方法
-        attn_implementation="flash_attention_2",  # 您可以根据需要选择其他的实现方式
+        method="snapkv",  # Set to pyramidkv method
+        attn_implementation="flash_attention_2",  # You can choose other implementations as needed
         max_capacity_prompt=2052,
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),
@@ -60,8 +60,8 @@ models = [
         max_seq_len=32768,
         batch_size=1,
         generation_kwargs=dict(),
-        method="snapkv",  # 设定为 pyramidkv 方法
-        attn_implementation="flash_attention_2",  # 您可以根据需要选择其他的实现方式
+        method="snapkv",  # Set to pyramidkv method
+        attn_implementation="flash_attention_2",  # You can choose other implementations as needed
         max_capacity_prompt=3076,
         run_cfg=dict(num_gpus=1, num_procs=1),
     ),

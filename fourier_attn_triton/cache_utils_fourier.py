@@ -389,12 +389,12 @@ class DynamicCache(Cache):
     def __init__(self, extra_config, num_hidden_layers: Optional[int] = None) -> None:
         super().__init__()
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
-        self.key_cache: List[Dict[str, torch.Tensor]] = []  # 更新为包含字典的列表
-        self.value_cache: List[Dict[str, torch.Tensor]] = []  # 更新为包含字典的列表
+        self.key_cache: List[Dict[str, torch.Tensor]] = []  # Update to list of dictionaries
+        self.value_cache: List[Dict[str, torch.Tensor]] = []  # Update to list of dictionaries
         self.maxnewtokens=extra_config.max_new_tokens
-        self.maxlocallen=extra_config.maxlocallen#局部窗口最大长度
-        self.maxmidstates=extra_config.maxmidstates #中间段最大长度(base_N)
-        self.numinittokens=extra_config.numinittokens #保留的初始token数目
+        self.maxlocallen=extra_config.maxlocallen#maximum local window length
+        self.maxmidstates=extra_config.maxmidstates #middle segment maximum length (base_N)
+        self.numinittokens=extra_config.numinittokens #number of initial tokens to retain
         self.maxlen=self.maxlocallen+self.maxmidstates+self.numinittokens
         self.heads=extra_config.num_key_value_heads
         self.maxtokens=extra_config.max_position_embeddings
@@ -418,7 +418,7 @@ class DynamicCache(Cache):
         self.kd_layer_average = []
         self.vd_layer_average = []
 
-        # 初始化为空列表，用于存储每一层的 k_non_critical_dims 和 v_non_critical_dims        
+        # Initialize as empty list to store k_non_critical_dims and v_non_critical_dims for each layer
         self.k_non_critical_dims = []
         self.k_non_critical_head_dims = []
         self.k_critical_dims = []
@@ -429,13 +429,13 @@ class DynamicCache(Cache):
         self.v_critical_dims = []
         self.v_critical_head_dims = []
 
-        # 遍历每一层并拼接数据
+        # Iterate over each layer and concatenate data
         for layer_idx in range(len(non_critical_dims)):
             self.curr_tokennum.append(0)
             layer_key = f"Layer_{layer_idx}"
 
             if layer_key in non_critical_dims:
-                # 拼接当前层的 k_proj 和 v_proj
+                # Concatenate k_proj and v_proj of current layer
                 # self.k_non_critical_dims.append(non_critical_dims[layer_key]["kc_list"])
                 # self.k_critical_dims.append(non_critical_dims[layer_key]["kn_list"])
                 # self.v_non_critical_dims.append(non_critical_dims[layer_key]["vc_list"])
@@ -454,10 +454,10 @@ class DynamicCache(Cache):
             else:
                 raise ValueError(f"Layer index {layer_idx} not found in non-critical dimensions JSON file.")
                 
-        # 将每一层的 k_proj 和 v_proj 拼接成二维数组
+        # Stack k_proj and v_proj of each layer into a 2D array
         # self.k_non_critical_dims = torch.stack([torch.tensor(dim) for dim in self.k_non_critical_dims])
         # self.v_non_critical_dims = torch.stack([torch.tensor(dim) for dim in self.v_non_critical_dims])
-        # 由于每一层的非关键维度数目不一样，不能再使用torch的堆叠，遂用列表来代替
+        # Since the number of non-critical dimensions for each layer is different, torch.stack cannot be used; use list instead
         # self.k_non_critical_dims = [dim for dim in self.k_non_critical_dims]
         # self.v_non_critical_dims = [dim for dim in self.v_non_critical_dims]
 
@@ -467,7 +467,7 @@ class DynamicCache(Cache):
         #self.final=torch.empty((0,0,0)).to("cuda")
 
     # no use
-    def __getitem__(self, layer_idx: int) -> List[Tuple[Dict[str, torch.Tensor]]]:  #有可能要加解压缩，现在还没干
+    def __getitem__(self, layer_idx: int) -> List[Tuple[Dict[str, torch.Tensor]]]:  # May need to add decompression, not done yet
         """
         Support for backwards-compatible `past_key_value` indexing, e.g. `past_key_value[0][0].shape[2]` to get the
         sequence length.
@@ -527,7 +527,7 @@ class DynamicCache(Cache):
         q_len=key_states.shape[-2]
 
         key_states=key_states.permute(0, 2, 1, 3) 
-        key_states = key_states.view(bsz, q_len, self.heads * self.head_dim)  # 变为不分头的形状
+        key_states = key_states.view(bsz, q_len, self.heads * self.head_dim)  # Convert to non-head format
 
         
         value_states=value_states.permute(0, 2, 1, 3) 
@@ -536,13 +536,13 @@ class DynamicCache(Cache):
 
         # Update the cache
         if len(self.key_cache) <= layer_idx:
-            # print(f"现在在第{layer_idx}层的prefill阶段!")
-            if layer_idx == 0: #刚prefill到第一层
+            # print(f"Currently in prefill stage at layer {layer_idx}!")
+            if layer_idx == 0: # Just reached first layer prefill
                 self.prefilllen=q_len
                 self.maxtokens=min(self.prefilllen+self.maxnewtokens,self.maxtokens)
                 self.hippo = MultiDimHiPPO2(
-                    N=self.k_non_critical_dims[layer_idx].shape[0]*self.maxmidstates, #原本是0
-                    input_dim=self.k_non_critical_dims[layer_idx].shape[0], #原本是0
+                    N=self.k_non_critical_dims[layer_idx].shape[0]*self.maxmidstates, # originally 0
+                    input_dim=self.k_non_critical_dims[layer_idx].shape[0], # originally 0
                     method='legt',
                     dt=1/(self.maxtokens-self.numinittokens-self.maxlocallen),
                     T=1
@@ -552,9 +552,9 @@ class DynamicCache(Cache):
             for _ in range(len(self.key_cache), layer_idx):
                 self.key_cache.append([])
                 self.value_cache.append([])
-            if q_len>self.maxlen: #序列长度大于inittoken数目+中间maxstates+局部窗口
+            if q_len>self.maxlen: # Sequence length greater than init_tokens + mid_maxstates + local_window
                 k_init=key_states[:,:self.numinittokens,:]
-                k_local=key_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                k_local=key_states[:,-self.maxlocallen:,:] # Local window key matrix
                 k_mid=key_states[:,self.numinittokens:-self.maxlocallen,:] 
                 # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
                 k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
@@ -572,15 +572,15 @@ class DynamicCache(Cache):
                 # k_compressed_squeezed = k_compressed
 
                 v_init=value_states[:,:self.numinittokens,:]
-                v_local=value_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                v_local=value_states[:,-self.maxlocallen:,:] # Local window key matrix
                 v_mid=value_states[:,self.numinittokens:-self.maxlocallen,:] 
                 # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
                 v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
                 v_tocompress = v_mid[:, :, self.v_non_critical_dims[layer_idx]]            
                 v_compressed=self.hippo(base_input=v_tocompress,token_num = self.curr_tokennum[layer_idx])
-                # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
+                # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) # originally 0
                 # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
-                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
+                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    # Shape becomes (bs, self.maxstates, number of non-critical dimensions)
                 # v_compressed_squeezed = v_compressed
 
                 u_avg, u_std = mat_avg_std_triton(v_tocompress.contiguous())
@@ -591,8 +591,8 @@ class DynamicCache(Cache):
                 self.vd_layer_average.append((i_avg).cuda())
 
                 self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
-                #v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
-                # print(f"{layer_idx}在prefill阶段压缩得到的v_compressed_squeezed:{v_compressed_squeezed}")
+                # v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
+                # print(f"{layer_idx} compressed v_compressed_squeezed in prefill stage: {v_compressed_squeezed}")
                 self.key_cache.append({"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local})
                 self.value_cache.append({"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local})
             else:
@@ -613,10 +613,10 @@ class DynamicCache(Cache):
             ret=({"k_init":None,"k_compressed":None,"k_uncompressed":None,"k_local":key_states},{"v_init":None,"v_compressed":None,"v_uncompressed":None,"v_local":value_states})
 
 
-        elif len(self.key_cache[layer_idx]) == 0:  # fills previously skipped layers; checking for tensor causes errors，其实就是上面被跳过的层
-            if q_len>self.maxlen: #序列长度大于inittoken数目+中间maxstates+局部窗口
+        elif len(self.key_cache[layer_idx]) == 0:  # fills previously skipped layers; checking for tensor causes errors, actually the layers skipped above
+            if q_len>self.maxlen: # Sequence length greater than init_tokens + mid_maxstates + local_window
                 k_init=key_states[:,:self.numinittokens,:]
-                k_local=key_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                k_local=key_states[:,-self.maxlocallen:,:] # Local window key matrix
                 k_mid=key_states[:,self.numinittokens:-self.maxlocallen,:] 
                 # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
                 k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
@@ -634,7 +634,7 @@ class DynamicCache(Cache):
                 # k_compressed_squeezed = k_compressed
 
                 v_init=value_states[:,:self.numinittokens,:]
-                v_local=value_states[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                v_local=value_states[:,-self.maxlocallen:,:] # Local window key matrix
                 v_mid=value_states[:,self.numinittokens:-self.maxlocallen,:] 
                 # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
                 v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
@@ -647,13 +647,13 @@ class DynamicCache(Cache):
                 self.v_scale[layer_idx] = (u_std / i_std).cuda()
                 self.v_layer_average[layer_idx] = u_avg.cuda()
                 self.vd_layer_average[layer_idx] = i_avg.cuda()
-                # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) #原本是0
+                # v_compressed_reshaped = v_compressed.view(1, bs, len(self.v_non_critical_dims[layer_idx]),self.maxmidstates) # originally 0
                 # v_compressed_reshaped=v_compressed_reshaped.permute(0,1,3,2)
-                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    #形状变为(bs,self.maxstates,非关键维度数目)
+                # v_compressed_squeezed = v_compressed_reshaped.squeeze(0)    # Shape becomes (bs, self.maxstates, number of non-critical dimensions)
                 # v_compressed_squeezed = v_compressed
                 self.curr_tokennum[layer_idx] += k_tocompress.shape[1]
-                #v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
-                # print(f"{layer_idx}在prefill阶段压缩得到的v_compressed_squeezed:{v_compressed_squeezed}")
+                # v_concat = torch.cat([v_init, v_compressed_squeezed, v_local], dim=1)
+                # print(f"{layer_idx} compressed v_compressed_squeezed in prefill stage: {v_compressed_squeezed}")
                 self.key_cache[layer_idx]={"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local}
                 self.value_cache[layer_idx]={"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local}
             else:
@@ -692,7 +692,7 @@ class DynamicCache(Cache):
 
                 k_init=k_local[:,:self.numinittokens,:]
                 k_mid=k_local[:,self.numinittokens:-self.maxlocallen,:] 
-                k_local=k_local[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                k_local=k_local[:,-self.maxlocallen:,:] # Local window key matrix
                 # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
                 k_uncompressed = k_mid[:, :, self.k_critical_dims[layer_idx]]
                 k_tocompress = k_mid[:, :, self.k_non_critical_dims[layer_idx]]
@@ -709,7 +709,7 @@ class DynamicCache(Cache):
 
                 v_init=v_local[:,:self.numinittokens,:]
                 v_mid=v_local[:,self.numinittokens:-self.maxlocallen,:] 
-                v_local=v_local[:,-self.maxlocallen:,:] #局部窗口对应key矩阵
+                v_local=v_local[:,-self.maxlocallen:,:] # Local window key matrix
                 # v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
                 v_uncompressed = v_mid[:, :, self.v_critical_dims[layer_idx]]
                 v_tocompress = v_mid[:, :, self.v_non_critical_dims[layer_idx]]            
@@ -734,13 +734,13 @@ class DynamicCache(Cache):
                 # k_non_critical_dims_int = set(tensor for tensor in self.k_non_critical_dims[layer_idx])
                 k_uncompressed = torch.cat([k_uncompressed,k_local[:, 0:1, self.k_critical_dims[layer_idx]]], dim=1)
                 k_local = torch.cat([k_local,key_states], dim=1)
-                k_local=k_local[:,1:,:] #局部窗口右进左出
+                k_local=k_local[:,1:,:] # Local window right-in-left-out
 
                 v_compressed = self.hippo(v_compressed,token_num = self.curr_tokennum[layer_idx],slice_input=v_local[:,0:1,self.v_non_critical_dims[layer_idx]]) 
                 v_non_critical_dims_int = set(tensor for tensor in self.v_non_critical_dims[layer_idx])
                 v_uncompressed = torch.cat([v_uncompressed,v_local[:, 0:1, self.v_critical_dims[layer_idx]]], dim=1)
                 v_local = torch.cat([v_local,value_states], dim=1)
-                v_local=v_local[:,1:,:] #局部窗口右进左出
+                v_local=v_local[:,1:,:] # Local window right-in-left-out
 
                 self.key_cache[layer_idx]={"k_init":k_init,"k_compressed":k_compressed,"k_uncompressed":k_uncompressed,"k_local":k_local}
                 self.value_cache[layer_idx]={"v_init":v_init,"v_compressed":v_compressed,"v_uncompressed":v_uncompressed,"v_local":v_local}   
@@ -755,7 +755,7 @@ class DynamicCache(Cache):
         is_empty_layer = (
             len(self.key_cache) == 0  # no cache in any layer
             or len(self.key_cache) <= layer_idx  # skipped `layer_idx` and hasn't run a layer with cache after it
-            or len(self.key_cache[layer_idx]) == 0  # the layer has no cache(被跳过了)
+            or len(self.key_cache[layer_idx]) == 0  # the layer has no cache (skipped)
         )
         layer_seq_length = self.key_cache[layer_idx]["k_init"].shape[-2]+self.key_cache[layer_idx]["k_uncompressed"].shape[-2]+self.key_cache[layer_idx]["k_local"].shape[-2] if not is_empty_layer else 0
         return layer_seq_length
@@ -770,7 +770,7 @@ class DynamicCache(Cache):
         legacy_cache = ()
         for layer_idx in range(len(self)):
             legacy_cache += ((self.key_cache[layer_idx], self.value_cache[layer_idx]),)
-        return legacy_cache #先不动
+        return legacy_cache # Don't touch for now
 
     @classmethod
     @deprecate_kwarg("num_hidden_layers", version="4.47.0")
@@ -784,7 +784,7 @@ class DynamicCache(Cache):
             for layer_idx in range(len(past_key_values)):
                 key_states, value_states = past_key_values[layer_idx]
                 cache.update(key_states, value_states, layer_idx)
-        return cache#先不动
+        return cache# Don't touch for now
 
     def crop(self, max_length: int):
         """Crop the past key values up to a new `max_length` in terms of tokens. `max_length` can also be
@@ -838,7 +838,7 @@ class DynamicCache(Cache):
                 layer_keys = torch.cat(key_cache, dim=0)
                 layer_values = torch.cat(value_cache, dim=0)
                 cache.update(layer_keys, layer_values, idx)
-        return cache #先不动
+        return cache # Don't touch for now
 
     def batch_select_indices(self, indices: torch.Tensor):
         """Only keep the `indices` in the batch dimension of the cache. Used in contrastive search."""

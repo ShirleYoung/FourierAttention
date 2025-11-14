@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 
 
-# 用于定义模型类型
-MODEL_TYPES = ['llama', 'qwen', 'mistral', 'internlm2', 'other']  # 根据需求添加更多模型
+# Used to define model types
+MODEL_TYPES = ['llama', 'qwen', 'mistral', 'internlm2', 'other']  # Add more models as needed
 
 class HippoattnCausalLM(BaseModel):
     def __init__(self,
@@ -23,7 +23,7 @@ class HippoattnCausalLM(BaseModel):
                  mode: str = 'none',
                  end_str: Optional[str] = None,
                  use_custom_attention: bool = False):
-        # 初始化父类
+        # Initialize parent class
         BaseModel.__init__(self, path=path, max_seq_len=max_seq_len)
         self.logger = get_logger()
         self.model_type = model_type
@@ -36,20 +36,20 @@ class HippoattnCausalLM(BaseModel):
         self.generation_kwargs = generation_kwargs
 
     def _load_tokenizer(self, path: Optional[str], tokenizer_path: Optional[str], tokenizer_kwargs: dict):
-        """加载指定路径的tokenizer"""
+        """Load tokenizer from the specified path"""
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path or path, **tokenizer_kwargs)
         self.pad_token_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id
 
     def _load_model(self, path: str, model_type: str, model_kwargs: dict):
-        """根据模型类型加载不同的预训练模型"""
+        """Load different pre-trained models based on model type"""
         self.config = AutoConfig.from_pretrained(path, trust_remote_code=True)
         
-        # 针对不同的模型类型加载不同的预训练模型
+        # Load different pre-trained models for different model types
         if model_type == 'llama':
             self.model = LlamaForCausalLM.from_pretrained(
                 path,
                 config=self.config,
-                device_map="auto"  # 直接传入 device_map 进行自动设备映射
+                device_map="auto"  # Directly pass device_map for automatic device mapping
             )
         elif model_type == 'qwen':
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -72,7 +72,7 @@ class HippoattnCausalLM(BaseModel):
                 config=self.config,
                 device_map="auto"
             )
-        else:  # 默认情况
+        else:  # Default case
             self.model = AutoModelForCausalLM.from_pretrained(
                 path,
                 **model_kwargs,
@@ -80,12 +80,12 @@ class HippoattnCausalLM(BaseModel):
                 device_map="auto"
             )
         
-        self.model.eval()  # 设置模型为评估模式
+        self.model.eval()  # Set model to evaluation mode
 
     @torch.no_grad()
     def generate(self, inputs: List[str], max_out_len: int) -> List[str]:
-        """根据输入生成文本"""
-        self.model.eval()  # 设置模型为评估模式
+        """Generate text based on input"""
+        self.model.eval()  # Set model to evaluation mode
         outputs_text = []
         
         for text in inputs:
